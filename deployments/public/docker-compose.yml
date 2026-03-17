@@ -74,6 +74,7 @@ services:
       NATS_URL: nats://nats:4222
       NATS_TOKEN: ${NATS_TOKEN}
       REGISTRY_URL: http://registry:8080
+      SESSION_TOKEN_SECRET: ${SESSION_TOKEN_SECRET}
       BID_WINDOW_MS: "2000"
     depends_on:
       nats:
