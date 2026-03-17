@@ -21,9 +21,12 @@ import (
 )
 
 func main() {
-	natsURL := os.Getenv("NATS_URL")
+	natsURL := strings.TrimSpace(os.Getenv("NATS_URL"))
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
+	}
+	if !strings.HasPrefix(natsURL, "nats://") && !strings.HasPrefix(natsURL, "tls://") {
+		natsURL = "nats://" + natsURL
 	}
 	natsToken := os.Getenv("NATS_TOKEN")
 	registryURL := os.Getenv("REGISTRY_URL")
