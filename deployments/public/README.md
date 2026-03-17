@@ -23,6 +23,14 @@ One VM runs: NATS, Registry, Matching, Postgres, Caddy (TLS).
    - Registry: `https://api.meshprotocol.dev` (after DNS points to this host)
    - NATS: `nats://<NATS_TOKEN>@nats.meshprotocol.dev:4222` (use the token from `.env` in your SDK)
 
+5. **Test subdomains and services**
+   ```bash
+   chmod +x test-services.sh
+   ./test-services.sh
+   # Or with another domain: ./test-services.sh mydomain.com
+   ```
+   The script checks: `api.<domain>/health`, `registry.<domain>/health`, NATS TCP on `nats.<domain>:4222`, and `GET /agents`.
+
 ## SDK usage
 
 ```bash

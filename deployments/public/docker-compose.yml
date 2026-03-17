@@ -2,7 +2,7 @@
 # Usage: cp .env.example .env && nano .env && docker compose up -d --build
 #
 # Exposes:
-#   https://registry.meshprotocol.ai   → Registry API (Caddy TLS)
+#   https://api.meshprotocol.dev        → Registry API (Caddy TLS)
 #   nats://nats.meshprotocol.dev:4222   → NATS + JetStream (token auth)
 
 services:
