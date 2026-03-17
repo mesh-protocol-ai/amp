@@ -3,9 +3,7 @@
 #
 # Exposes:
 #   https://registry.meshprotocol.ai   → Registry API (Caddy TLS)
-#   nats://nats.meshprotocol.ai:4222   → NATS + JetStream (token auth)
-
-version: "3.9"
+#   nats://nats.meshprotocol.dev:4222   → NATS + JetStream (token auth)
 
 services:
   # ─── NATS (JetStream + token auth) ─────────────────────────────────────────
@@ -14,7 +12,7 @@ services:
     container_name: amp-nats
     environment:
       - NATS_TOKEN=${NATS_TOKEN}
-    command: ["/bin/sh", "-c", "nats-server -c /etc/nats/nats-server.conf -a token=$$NATS_TOKEN"]
+    command: ["/bin/sh", "-c", "nats-server -c /etc/nats/nats-server.conf --auth \"$$NATS_TOKEN\""]
     ports:
       - "4222:4222"   # public: agent connections
       # 8222 intentionally NOT exposed (monitoring internal only)
