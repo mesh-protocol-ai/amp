@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and fill in
+
+region         = "us-east-1"
+instance_type  = "t3.small"
+ssh_key_name   = "your-aws-ec2-key-name"
+domain         = "meshprotocol.dev"
+
+# Restrict SSH in production (e.g. your office IP)
+allowed_ssh_cidrs = ["0.0.0.0/0"]
+
+tags = {
+  Project = "amp-enterprise-test"
+}

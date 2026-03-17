@@ -1,0 +1,100 @@
+# AMP — Public endpoint (Oracle VM)
+# Usage: cp .env.example .env && nano .env && docker compose up -d --build
+#
+# Exposes:
+#   https://registry.meshprotocol.ai   → Registry API (Caddy TLS)
+#   nats://nats.meshprotocol.ai:4222   → NATS + JetStream (token auth)
+
+version: "3.9"
+
+services:
+  # ─── NATS (JetStream + token auth) ─────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    container_name: amp-nats
+    environment:
+      - NATS_TOKEN=${NATS_TOKEN}
+    command: ["/bin/sh", "-c", "nats-server -c /etc/nats/nats-server.conf -a token=$$NATS_TOKEN"]
+    ports:
+      - "4222:4222"   # public: agent connections
+      # 8222 intentionally NOT exposed (monitoring internal only)
+    volumes:
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── PostgreSQL (internal only) ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: amp-postgres
+    environment:
+      POSTGRES_USER: amp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: amp_registry
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../deployments/init-db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amp -d amp_registry"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Registry API ───────────────────────────────────────────────────────────
+  registry:
+    build:
+      context: ../..
+      dockerfile: services/registry/Dockerfile
+    container_name: amp-registry
+    environment:
+      DATABASE_URL: postgres://amp:${POSTGRES_PASSWORD}@postgres:5432/amp_registry?sslmode=disable
+      HTTP_PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # No port exposed publicly — Caddy proxies on 443
+
+  # ─── Matching Engine ─────────────────────────────────────────────────────────
+  matching:
+    build:
+      context: ../..
+      dockerfile: services/matching/Dockerfile
+    container_name: amp-matching
+    environment:
+      NATS_URL: nats://${NATS_TOKEN}@nats:4222
+      REGISTRY_URL: http://registry:8080
+      BID_WINDOW_MS: "2000"
+    depends_on:
+      nats:
+        condition: service_healthy
+      registry:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── Caddy (TLS termination + reverse proxy) ─────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: amp-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - registry
+    restart: unless-stopped
+
+volumes:
+  nats-data:
+  postgres-data:
+  caddy-data:
+  caddy-config:

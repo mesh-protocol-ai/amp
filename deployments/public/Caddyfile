@@ -1,0 +1,10 @@
+# AMP Registry API — TLS via Let's Encrypt
+# api and registry both proxy to the same Registry service on this VM.
+
+api.meshprotocol.dev {
+	reverse_proxy registry:8080
+}
+
+registry.meshprotocol.dev {
+	reverse_proxy registry:8080
+}

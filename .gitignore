@@ -45,5 +45,11 @@ logs/
 # Node
 node_modules/
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+
 # HTML
 *.html
