@@ -66,7 +66,8 @@ services:
       dockerfile: services/matching/Dockerfile
     container_name: amp-matching
     environment:
-      NATS_URL: nats://${NATS_TOKEN}@nats:4222
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN}
       REGISTRY_URL: http://registry:8080
       BID_WINDOW_MS: "2000"
     depends_on:

@@ -24,13 +24,18 @@ func main() {
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
 	}
+	natsToken := os.Getenv("NATS_TOKEN")
 	registryURL := os.Getenv("REGISTRY_URL")
 	if registryURL == "" {
 		registryURL = "http://localhost:8080"
 	}
 	registryURL = strings.TrimSuffix(registryURL, "/")
 
-	nc, err := nats.Connect(natsURL, nats.Timeout(5*time.Second))
+	opts := []nats.Option{nats.Timeout(5 * time.Second)}
+	if natsToken != "" {
+		opts = append(opts, nats.Token(natsToken))
+	}
+	nc, err := nats.Connect(natsURL, opts...)
 	if err != nil {
 		log.Fatalf("nats connect: %v", err)
 	}
