@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:company-legal",
+    "name": "LegalAgent",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:company",
+    "annotations": {
+      "description": "Legal specialist — active contracts, compliance status, pending items"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["company", "legal"],
+      "tags": ["legal", "contracts", "compliance", "lgpd", "liability"]
+    },
+    "capabilities": [
+      {
+        "id": "legal-query",
+        "description": "Answers questions about active contracts, LGPD compliance and pending legal items",
+        "languages": ["pt-BR", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": { "nats_subject": "mesh.agents.company.legal" },
+      "data_plane":    { "grpc": "grpc://legal-agent.company.mesh:443" }
+    }
+  },
+  "status": { "health": "healthy", "trust_score": 5.0 }
+}

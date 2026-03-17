@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:nebula-echo-provider",
+    "name": "NebulaEchoProvider",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:demo",
+    "annotations": {
+      "description": "Agente NebulaOS que oferece capacidade de resposta/echo na mesh"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["demo", "nebula"],
+      "tags": ["nebulaos", "demo"]
+    },
+    "capabilities": [
+      {
+        "id": "assistant",
+        "description": "Responde mensagens usando NebulaOS",
+        "languages": ["pt-BR", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": {
+        "nats_subject": "mesh.agents.demo.nebula"
+      },
+      "data_plane": {
+        "grpc": "grpc://nebula-echo-provider.demo.mesh:443"
+      }
+    }
+  },
+  "status": {
+    "health": "healthy",
+    "trust_score": 5.0
+  }
+}

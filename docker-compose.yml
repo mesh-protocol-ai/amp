@@ -1,0 +1,74 @@
+# AMP — Control Plane + Registry + Matching (Fase 1)
+# Uso: docker compose up -d
+
+version: "3.9"
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: amp-nats
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--http_port=8222"
+      - "-m"
+      - "8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: amp-postgres
+    environment:
+      POSTGRES_USER: amp
+      POSTGRES_PASSWORD: amp
+      POSTGRES_DB: amp_registry
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deployments/init-db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amp -d amp_registry"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  registry:
+    build:
+      context: .
+      dockerfile: services/registry/Dockerfile
+    container_name: amp-registry
+    environment:
+      DATABASE_URL: postgres://amp:amp@postgres:5432/amp_registry?sslmode=disable
+      HTTP_PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  matching:
+    build:
+      context: .
+      dockerfile: services/matching/Dockerfile
+    container_name: amp-matching
+    environment:
+      NATS_URL: nats://nats:4222
+      REGISTRY_URL: http://registry:8080
+      BID_WINDOW_MS: "2000"
+    depends_on:
+      - nats
+      - registry
+
+volumes:
+  nats-data:
+  postgres-data:

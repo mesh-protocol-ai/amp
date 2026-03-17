@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:echo-demo-001",
+    "name": "EchoAgent",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:demo",
+    "annotations": {
+      "description": "Example agent that returns the received payload (echo)"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["demo", "echo"],
+      "tags": ["mvp", "test"]
+    },
+    "capabilities": [
+      {
+        "id": "echo",
+        "description": "Returns the received input",
+        "languages": ["pt-BR", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": {
+        "nats_subject": "mesh.agents.demo.echo"
+      },
+      "data_plane": {
+        "grpc": "grpc://echo-agent.demo.mesh:443"
+      }
+    }
+  },
+  "status": {
+    "health": "healthy",
+    "trust_score": 5.0
+  }
+}

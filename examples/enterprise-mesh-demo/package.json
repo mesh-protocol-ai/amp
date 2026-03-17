@@ -1,0 +1,17 @@
+{
+  "name": "enterprise-mesh-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all":   "npm install --prefix agent-hr && npm install --prefix agent-finance && npm install --prefix agent-legal && npm install --prefix agent-executive",
+    "run:hr":        "npm run start --prefix agent-hr",
+    "run:finance":   "npm run start --prefix agent-finance",
+    "run:legal":     "npm run start --prefix agent-legal",
+    "run:executive": "npm run start --prefix agent-executive",
+    "run:executive:headcount": "node agent-executive/index.js \"What is the headcount by region?\"",
+    "run:executive:budget":    "node agent-executive/index.js \"How is Q1 budget variance?\"",
+    "run:executive:compliance":"node agent-executive/index.js \"What is our LGPD compliance status?\"",
+    "run:executive:all":       "node agent-executive/index.js \"Give me a complete company status report.\""
+  }
+}

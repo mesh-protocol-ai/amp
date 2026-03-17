@@ -1,0 +1,49 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Go
+*.test
+*.out
+go.work
+vendor/
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Env
+.env
+.env.local
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated (optional: commit pkg/proto for build without buf)
+# *.pb.go
+# pkg/proto/
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+
+# HTML
+*.html

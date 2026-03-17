@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:company-hr",
+    "name": "HRAgent",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:company",
+    "annotations": {
+      "description": "HR specialist — headcount, open positions, vacation policy, turnover"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["company", "hr"],
+      "tags": ["hr", "headcount", "people", "recruiting"]
+    },
+    "capabilities": [
+      {
+        "id": "hr-query",
+        "description": "Answers questions about headcount, open positions, vacation policy and turnover",
+        "languages": ["pt-BR", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": { "nats_subject": "mesh.agents.company.hr" },
+      "data_plane":    { "grpc": "grpc://hr-agent.company.mesh:443" }
+    }
+  },
+  "status": { "health": "healthy", "trust_score": 5.0 }
+}

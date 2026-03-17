@@ -1,0 +1,13 @@
+{
+  "name": "nebula-mesh-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --prefix agent-provider && npm install --prefix agent-consumer && npm install --legacy-peer-deps --prefix agent-math-expert && npm install --legacy-peer-deps --prefix agent-dumb",
+    "run:provider": "npm run start --prefix agent-provider",
+    "run:consumer": "npm run start --prefix agent-consumer",
+    "run:math-expert": "npm run start --prefix agent-math-expert",
+    "run:dumb": "npm run start --prefix agent-dumb"
+  }
+}

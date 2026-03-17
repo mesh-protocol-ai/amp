@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:company-finance",
+    "name": "FinanceAgent",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:company",
+    "annotations": {
+      "description": "Finance specialist — budget, variance, cash flow, cost centers"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["company", "finance"],
+      "tags": ["finance", "budget", "q1", "cash-flow", "variance"]
+    },
+    "capabilities": [
+      {
+        "id": "finance-query",
+        "description": "Answers questions about Q1 budget variance, cash flow and cost centers",
+        "languages": ["pt-BR", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": { "nats_subject": "mesh.agents.company.finance" },
+      "data_plane":    { "grpc": "grpc://finance-agent.company.mesh:443" }
+    }
+  },
+  "status": { "health": "healthy", "trust_score": 5.0 }
+}
