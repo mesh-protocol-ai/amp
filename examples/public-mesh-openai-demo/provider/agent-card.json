@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "id": "did:mesh:agent:math-expert-public-demo",
+    "name": "MathExpertPublicDemo",
+    "version": "1.0.0",
+    "owner": "did:mesh:org:demo",
+    "annotations": {
+      "description": "Math specialist (OpenAI) — public mesh demo"
+    }
+  },
+  "spec": {
+    "domains": {
+      "primary": ["demo", "math"],
+      "tags": ["math", "calculator", "openai", "public-demo"]
+    },
+    "capabilities": [
+      {
+        "id": "calculator",
+        "description": "Solves mathematical expressions and questions",
+        "languages": ["en-US", "en"]
+      }
+    ],
+    "endpoints": {
+      "control_plane": {
+        "nats_subject": "mesh.agents.demo.math"
+      },
+      "data_plane": {
+        "grpc": "grpc://math-expert.demo.mesh:443"
+      }
+    }
+  },
+  "status": {
+    "health": "healthy",
+    "trust_score": 5.0
+  }
+}
