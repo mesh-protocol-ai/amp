@@ -1,0 +1,141 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "1000 * histogram_quantile(0.5, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"llm_execute\"}[5m])) by (le))", "legendFormat": "P50", "refId": "A"},
+        {"expr": "1000 * histogram_quantile(0.95, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"llm_execute\"}[5m])) by (le))", "legendFormat": "P95", "refId": "B"},
+        {"expr": "1000 * histogram_quantile(0.99, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"llm_execute\"}[5m])) by (le))", "legendFormat": "P99", "refId": "C"}
+      ],
+      "title": "LLM Execute Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "1000 * histogram_quantile(0.5, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"transfer_total\"}[5m])) by (le))", "legendFormat": "P50", "refId": "A"},
+        {"expr": "1000 * histogram_quantile(0.95, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"transfer_total\"}[5m])) by (le))", "legendFormat": "P95", "refId": "B"},
+        {"expr": "1000 * histogram_quantile(0.99, sum(rate(mesh_provider_processing_duration_seconds_bucket{step=\"transfer_total\"}[5m])) by (le))", "legendFormat": "P99", "refId": "C"}
+      ],
+      "title": "Transfer Total Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "1000 * histogram_quantile(0.5, sum(rate(mesh_provider_dataplane_phase_duration_seconds_bucket{phase=\"handshake\"}[5m])) by (le))", "legendFormat": "P50", "refId": "A"},
+        {"expr": "1000 * histogram_quantile(0.95, sum(rate(mesh_provider_dataplane_phase_duration_seconds_bucket{phase=\"handshake\"}[5m])) by (le))", "legendFormat": "P95", "refId": "B"},
+        {"expr": "1000 * histogram_quantile(0.99, sum(rate(mesh_provider_dataplane_phase_duration_seconds_bucket{phase=\"handshake\"}[5m])) by (le))", "legendFormat": "P99", "refId": "C"}
+      ],
+      "title": "Handshake Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "sum(rate(mesh_provider_dataplane_handshake_total{outcome=\"failed\"}[5m])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}
+      ],
+      "title": "Handshake Failures by Reason (rate/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "sum(rate(mesh_provider_dataplane_transfer_total[5m])) by (outcome, reason)", "legendFormat": "{{outcome}} / {{reason}}", "refId": "A"}
+      ],
+      "title": "Transfer Outcomes (rate/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 24},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "1000 * histogram_quantile(0.99, sum(rate(mesh_provider_handshake_step_duration_seconds_bucket[5m])) by (le, step))", "legendFormat": "{{step}}", "refId": "A"}
+      ],
+      "title": "Handshake Step P99 (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 24},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "1000 * histogram_quantile(0.99, sum(rate(mesh_provider_processing_duration_seconds_bucket[5m])) by (le, step))", "legendFormat": "{{step}}", "refId": "A"}
+      ],
+      "title": "Processing Step P99 (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+      "id": 8,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {"expr": "sum(rate(mesh_provider_registry_cache_total{result=\"hit\"}[5m]))", "legendFormat": "hit", "refId": "A"},
+        {"expr": "sum(rate(mesh_provider_registry_cache_total{result=\"miss\"}[5m]))", "legendFormat": "miss", "refId": "B"}
+      ],
+      "title": "Registry Cache Hit/Miss Rate (ops/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+      "id": 9,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "sum(rate(mesh_provider_registry_cache_total{result=\"hit\"}[5m])) / clamp_min(sum(rate(mesh_provider_registry_cache_total[5m])), 1e-9)",
+          "legendFormat": "hit_ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Registry Cache Hit Ratio",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["mesh", "provider", "latency", "p99"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "Mesh Provider Latency & Errors",
+  "uid": "mesh-provider-latency",
+  "version": 1,
+  "weekStart": ""
+}

@@ -118,8 +118,40 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   const providerKeyAgreementPublicBase64 = exportX25519PublicKeyBase64(providerStaticKeyAgreement.publicKey);
 
   const sessions = new Map();
+
+  // ─── DID Document cache (reduces consumer_registry_fetch under load) ────────
+  const CONSUMER_DID_CACHE_TTL_MS = 60_000; // 60s — short enough to respect key rotation
+  const consumerDidCache = new Map(); // Map<consumerDid, { data, fetchedAt }>
+
+  async function fetchConsumerInfo(consumerDid) {
+    const cached = consumerDidCache.get(consumerDid);
+    const now = Date.now();
+    if (cached && (now - cached.fetchedAt) < CONSUMER_DID_CACHE_TTL_MS) {
+      registryCacheCounter.inc({ result: "hit" });
+      return { ok: true, data: cached.data };
+    }
+    registryCacheCounter.inc({ result: "miss" });
+    const resp = await fetch(`${REGISTRY_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(consumerDid)}`);
+    if (!resp.ok) return { ok: false, data: null };
+    const data = await resp.json();
+    consumerDidCache.set(consumerDid, { data, fetchedAt: now });
+    // Evict stale entries periodically (keep cache bounded)
+    if (consumerDidCache.size > 500) {
+      for (const [key, entry] of consumerDidCache) {
+        if ((now - entry.fetchedAt) > CONSUMER_DID_CACHE_TTL_MS) consumerDidCache.delete(key);
+      }
+    }
+    return { ok: true, data };
+  }
+
   const register = new client.Registry();
   client.collectDefaultMetrics({ register, prefix: "mesh_provider_" });
+  const registryCacheCounter = new client.Counter({
+    name: "mesh_provider_registry_cache_total",
+    help: "Consumer DID registry cache hits and misses",
+    labelNames: ["result"],
+    registers: [register],
+  });
   const handshakeCounter = new client.Counter({
     name: "mesh_provider_dataplane_handshake_total",
     help: "Total handshake attempts by outcome and reason",
@@ -151,6 +183,20 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
     registers: [register],
   });
+  const handshakeStepLatency = new client.Histogram({
+    name: "mesh_provider_handshake_step_duration_seconds",
+    help: "Handshake latency by internal step",
+    labelNames: ["step"],
+    buckets: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2],
+    registers: [register],
+  });
+  const processingLatency = new client.Histogram({
+    name: "mesh_provider_processing_duration_seconds",
+    help: "Provider processing latency by step",
+    labelNames: ["step"],
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 40],
+    registers: [register],
+  });
   const metricsServer = http.createServer(async (req, res) => {
     if (req.url !== "/metrics") {
       res.writeHead(404);
@@ -173,18 +219,24 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   grpcServer.addService(DataPlaneService.service, {
     Handshake: async (call, callback) => {
       const endLatency = phaseLatency.startTimer({ phase: "handshake" });
+      const hsStart = Date.now();
       try {
         const req = call.request || {};
+        const lookupStart = Date.now();
         const session = sessions.get(req.session_id);
+        handshakeStepLatency.observe({ step: "session_lookup" }, (Date.now() - lookupStart) / 1000);
         if (!session) {
           handshakeCounter.inc({ outcome: "failed", reason: "session_not_found" });
           callback({ code: grpc.status.NOT_FOUND, message: "session_not_found" });
           return;
         }
         let claims;
+        const jwtStart = Date.now();
         try {
           claims = jwt.verify(req.session_token, SESSION_TOKEN_SECRET, { algorithms: ["HS256"] });
+          handshakeStepLatency.observe({ step: "jwt_verify" }, (Date.now() - jwtStart) / 1000);
         } catch (err) {
+          handshakeStepLatency.observe({ step: "jwt_verify" }, (Date.now() - jwtStart) / 1000);
           handshakeCounter.inc({ outcome: "failed", reason: "invalid_session_token" });
           callback({ code: grpc.status.UNAUTHENTICATED, message: `invalid_session_token: ${err.message}` });
           return;
@@ -194,28 +246,33 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
           callback({ code: grpc.status.PERMISSION_DENIED, message: "session_claims_mismatch" });
           return;
         }
-        const consumerInfoResp = await fetch(`${REGISTRY_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(req.consumer_did)}`);
-        if (!consumerInfoResp.ok) {
+        const registryStart = Date.now();
+        const consumerResult = await fetchConsumerInfo(req.consumer_did);
+        handshakeStepLatency.observe({ step: "consumer_registry_fetch" }, (Date.now() - registryStart) / 1000);
+        if (!consumerResult.ok) {
           handshakeCounter.inc({ outcome: "failed", reason: "consumer_did_not_registered" });
           callback({ code: grpc.status.PERMISSION_DENIED, message: "consumer_did_not_registered" });
           return;
         }
-        const consumerInfo = await consumerInfoResp.json();
+        const consumerInfo = consumerResult.data;
         const consumerPubKeyB64 = consumerInfo?.card?.metadata?.did_document?.verification_method?.[0]?.public_key_base64;
         if (!consumerPubKeyB64) {
           handshakeCounter.inc({ outcome: "failed", reason: "consumer_did_document_missing" });
           callback({ code: grpc.status.PERMISSION_DENIED, message: "consumer_did_document_missing" });
           return;
         }
+        const sigVerifyStart = Date.now();
         const consumerPublicKey = publicKeyFromBase64(consumerPubKeyB64);
         const consumerSigPayload = buildHandshakePayload(req.session_id, req.consumer_did, req.consumer_ephemeral_pub);
         const consumerSigValid = verifyEd25519(consumerPublicKey, consumerSigPayload, Buffer.from(req.consumer_did_signature));
+        handshakeStepLatency.observe({ step: "consumer_signature_verify" }, (Date.now() - sigVerifyStart) / 1000);
         if (!consumerSigValid) {
           handshakeCounter.inc({ outcome: "failed", reason: "consumer_signature_invalid" });
           callback({ code: grpc.status.PERMISSION_DENIED, message: "consumer_signature_invalid" });
           return;
         }
 
+        const cryptoStart = Date.now();
         const providerEph = createX25519Ephemeral();
         const providerEphPub = exportX25519PublicKeyBytes(providerEph.publicKey);
         const sessionKey = deriveSessionKey({
@@ -225,6 +282,7 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
         });
         const providerSigPayload = buildHandshakePayload(req.session_id, agentCardJson.metadata.id, providerEphPub);
         const providerSig = signEd25519(providerPrivateKey, providerSigPayload);
+        handshakeStepLatency.observe({ step: "derive_key_and_sign" }, (Date.now() - cryptoStart) / 1000);
 
         session.consumerDid = req.consumer_did;
         session.handshakeOk = true;
@@ -236,6 +294,7 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
           provider_did: agentCardJson.metadata.id,
           provider_did_signature: providerSig,
         });
+        handshakeStepLatency.observe({ step: "handshake_total" }, (Date.now() - hsStart) / 1000);
       } catch (err) {
         handshakeCounter.inc({ outcome: "failed", reason: "internal_error" });
         callback({ code: grpc.status.INTERNAL, message: err.message });
@@ -245,8 +304,15 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
     },
     Transfer: (call, callback) => {
       const endLatency = phaseLatency.startTimer({ phase: "transfer" });
-      const md = call.metadata.get("x-session-id");
-      const sessionId = typeof md[0] === "string" ? md[0] : "";
+      // gRPC-js normalizes header names to lowercase; support both get styles.
+      const md = call.metadata.get("x-session-id") ?? call.metadata.get("X-Session-Id");
+      const raw = Array.isArray(md) ? md[0] : md;
+      const sessionId = raw != null && raw !== "" ? String(raw) : "";
+      if (!sessionId) {
+        const keys = [];
+        call.metadata.forEach((_, k) => keys.push(k));
+        console.warn("[MathExpert] Transfer metadata missing x-session-id. Keys:", keys.join(", ") || "(none)");
+      }
       const session = sessions.get(sessionId);
       if (!session || !session.handshakeOk) {
         transferCounter.inc({ outcome: "failed", reason: "handshake_required" });
@@ -285,8 +351,10 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
       });
       call.on("end", async () => {
         try {
+          const tStart = Date.now();
           const payloadRaw = Buffer.concat(chunks).toString("utf8");
           const payload = JSON.parse(payloadRaw);
+          const parseMs = Date.now() - tStart;
           const question = String(payload.description || payload.question || "").trim();
           if (!question) {
             transferCounter.inc({ outcome: "failed", reason: "empty_question" });
@@ -294,17 +362,41 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
             callback(null, { accepted: false, chunks_received: chunks.length, error_code: "EMPTY_QUESTION", error_message: "empty question" });
             return;
           }
+          const tAgentStateStart = Date.now();
           await agent.addMessage({ role: "user", content: question });
+          const addMessageMs = Date.now() - tAgentStateStart;
+          processingLatency.observe({ step: "agent_add_message" }, addMessageMs / 1000);
+          const tLlmStart = Date.now();
           const result = await agent.execute();
+          const llmMs = Date.now() - tLlmStart;
           const answer = (result.content && typeof result.content === "string")
             ? result.content.trim()
             : "(no response)";
+          const tPayloadStart = Date.now();
           const responsePayload = Buffer.from(JSON.stringify({ result: answer }), "utf8");
+          const payloadMs = Date.now() - tPayloadStart;
+          processingLatency.observe({ step: "build_response_payload" }, payloadMs / 1000);
+          const tEncryptStart = Date.now();
           session.resultChunk = encryptChunk({
             key: session.sessionKey,
             sequence: session.lastSequence + 1,
             payloadBuffer: responsePayload,
           });
+          const encryptMs = Date.now() - tEncryptStart;
+          const totalMs = Date.now() - tStart;
+          processingLatency.observe({ step: "parse_payload" }, parseMs / 1000);
+          processingLatency.observe({ step: "llm_execute" }, llmMs / 1000);
+          processingLatency.observe({ step: "encrypt_result" }, encryptMs / 1000);
+          processingLatency.observe({ step: "transfer_total" }, totalMs / 1000);
+          console.log("[MathExpert][timing]", JSON.stringify({
+            session_id: sessionId,
+            parse_ms: parseMs,
+            add_message_ms: addMessageMs,
+            llm_ms: llmMs,
+            build_payload_ms: payloadMs,
+            encrypt_ms: encryptMs,
+            transfer_total_ms: totalMs,
+          }));
           session.lastSequence += 1;
           transferCounter.inc({ outcome: "ok", reason: "none" });
           endLatency();
@@ -317,18 +409,22 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
       });
     },
     Result: (call) => {
+      const endLatency = phaseLatency.startTimer({ phase: "result" });
       const req = call.request || {};
       const session = sessions.get(req.session_id);
       if (!session || !session.handshakeOk) {
         call.emit("error", { code: grpc.status.UNAUTHENTICATED, message: "handshake_required" });
+        endLatency();
         return;
       }
       if (!session.resultChunk) {
         call.emit("error", { code: grpc.status.FAILED_PRECONDITION, message: "result_not_ready" });
+        endLatency();
         return;
       }
       call.write(session.resultChunk);
       call.end();
+      endLatency();
     },
     StreamingTask: (stream) => {
       stream.emit("error", { code: grpc.status.UNIMPLEMENTED, message: "not_implemented" });

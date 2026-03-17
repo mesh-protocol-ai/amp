@@ -8,7 +8,7 @@ import { Agent, InMemory, Tool } from "@nebulaos/core";
 import { OpenAI } from "@nebulaos/openai";
 import { MeshClient } from "@meshprotocol/sdk";
 import { z } from "zod";
-import { createDataPlaneClient, parseGrpcEndpoint } from "../shared/dataplane.js";
+import { createDataPlaneClient, parseGrpcEndpoint, grpc } from "../shared/dataplane.js";
 import {
   buildHandshakePayload,
   createX25519Ephemeral,
@@ -64,6 +64,7 @@ const DATAPLANE_TLS_CA_CERT_PATH = (process.env.DATAPLANE_TLS_CA_CERT_PATH || ""
 const DATAPLANE_TLS_CLIENT_CERT_PATH = (process.env.DATAPLANE_TLS_CLIENT_CERT_PATH || "").trim();
 const DATAPLANE_TLS_CLIENT_KEY_PATH = (process.env.DATAPLANE_TLS_CLIENT_KEY_PATH || "").trim();
 const DATAPLANE_TLS_SERVER_NAME = (process.env.DATAPLANE_TLS_SERVER_NAME || "").trim();
+const nowMs = () => Date.now();
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("[Consumer] OPENAI_API_KEY is required (set in .env).");
@@ -139,144 +140,191 @@ async function main() {
       question: z.string().describe("The math question or expression"),
     }),
     handler: async (_ctx, { question }) => {
-      const result = await mesh.request({
-        domain: ["demo", "math"],
-        capabilityId: "calculator",
-        description: question,
-        timeoutMs: REQUEST_TIMEOUT_MS,
-      });
+      const timings = {};
+      const totalStart = nowMs();
+      try {
+        const matchStart = nowMs();
+        const result = await mesh.request({
+          domain: ["demo", "math"],
+          capabilityId: "calculator",
+          description: question,
+          timeoutMs: REQUEST_TIMEOUT_MS,
+        });
+        timings.match_ms = nowMs() - matchStart;
 
-      if (result.kind === "reject") {
-        return { success: false, error: result.reason, result: null };
-      }
+        if (result.kind === "reject") {
+          console.log("[Consumer][timing]", JSON.stringify({ ...timings, outcome: "reject", reason: result.reason }));
+          return { success: false, error: result.reason, result: null };
+        }
 
-      const sessionId = result.sessionId;
-      const providerDid = result.parties.provider;
-      const providerInfoResp = await fetch(`${REGISTRY_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(providerDid)}`);
-      if (!providerInfoResp.ok) {
-        throw new Error(`Provider registry lookup failed: ${providerInfoResp.status}`);
-      }
-      const providerInfo = await providerInfoResp.json();
-      const capability = providerInfo?.card?.metadata?.annotations?.dataplane_capability;
-      if (capability !== "v1-e2e" && !ALLOW_LEGACY_DATAPLANE) {
-        throw new Error("Provider does not advertise dataplane_capability=v1-e2e");
-      }
-      const providerGrpcEndpoint = parseGrpcEndpoint(providerInfo?.card?.spec?.endpoints?.data_plane?.grpc || "");
-      const providerPubKeyB64 = providerInfo?.card?.metadata?.did_document?.verification_method?.[0]?.public_key_base64;
-      const providerAgreementKeyB64 = providerInfo?.card?.metadata?.did_document?.key_agreement?.[0]?.public_key_base64;
-      if (!providerPubKeyB64) {
-        throw new Error("Provider DID document missing public key");
-      }
-      if (!providerAgreementKeyB64) {
-        throw new Error("Provider DID document missing keyAgreement X25519 key");
-      }
-      const providerPublicKey = publicKeyFromBase64(providerPubKeyB64);
-      const dpClient = createDataPlaneClient(providerGrpcEndpoint, {
-        insecure: DATAPLANE_ALLOW_INSECURE,
-        caCertPath: DATAPLANE_TLS_CA_CERT_PATH,
-        clientCertPath: DATAPLANE_TLS_CLIENT_CERT_PATH,
-        clientKeyPath: DATAPLANE_TLS_CLIENT_KEY_PATH,
-        serverName: DATAPLANE_TLS_SERVER_NAME,
-      });
-      const consumerEph = createX25519Ephemeral();
-      const consumerEphPub = exportX25519PublicKeyBytes(consumerEph.publicKey);
-      // Ensures provider DID exposes a valid X25519 key for agreement.
-      const providerAgreementKey = importX25519PublicKeyBase64(providerAgreementKeyB64);
-      const didSharedSecret = crypto.diffieHellman({
-        privateKey: consumerEph.privateKey,
-        publicKey: providerAgreementKey,
-      });
-      if (!didSharedSecret || didSharedSecret.length === 0) {
-        throw new Error("Unable to derive shared secret using provider DID key agreement");
-      }
-      const consumerSigPayload = buildHandshakePayload(sessionId, CONSUMER_DID, consumerEphPub);
-      const consumerSig = signEd25519(consumerPrivateKey, consumerSigPayload);
+        const sessionId = result.sessionId;
+        const providerDid = result.parties.provider;
 
-      const handshakeResp = await new Promise((resolve, reject) => {
-        dpClient.Handshake({
-          session_id: sessionId,
-          session_token: result.sessionToken,
-          consumer_ephemeral_pub: consumerEphPub,
-          consumer_did: CONSUMER_DID,
-          consumer_did_signature: consumerSig,
-        }, (err, response) => (err ? reject(err) : resolve(response)));
-      });
-      const providerSigPayload = buildHandshakePayload(
-        sessionId,
-        handshakeResp.provider_did,
-        handshakeResp.provider_ephemeral_pub
-      );
-      const providerSigValid = verifyEd25519(
-        providerPublicKey,
-        providerSigPayload,
-        Buffer.from(handshakeResp.provider_did_signature)
-      );
-      if (!providerSigValid) {
-        throw new Error("Provider handshake signature invalid");
-      }
-      const sessionKey = deriveSessionKey({
-        privateKey: consumerEph.privateKey,
-        peerPublicKeyBytes: handshakeResp.provider_ephemeral_pub,
-        sessionId,
-      });
+        // Give the provider time to process the match and create the session (avoids session_not_found race).
+        await new Promise((r) => setTimeout(r, 500));
 
-      await new Promise((resolve, reject) => {
-        const call = dpClient.Transfer(
-          { "x-session-id": sessionId },
-          (err, ack) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-            if (!ack?.accepted) {
-              reject(new Error(ack?.error_message || "provider rejected transfer"));
-              return;
-            }
-            resolve();
-          }
+        const registryStart = nowMs();
+        const providerInfoResp = await fetch(`${REGISTRY_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(providerDid)}`);
+        if (!providerInfoResp.ok) {
+          throw new Error(`Provider registry lookup failed: ${providerInfoResp.status}`);
+        }
+        const providerInfo = await providerInfoResp.json();
+        timings.registry_lookup_ms = nowMs() - registryStart;
+
+        const capability = providerInfo?.card?.metadata?.annotations?.dataplane_capability;
+        if (capability !== "v1-e2e" && !ALLOW_LEGACY_DATAPLANE) {
+          throw new Error("Provider does not advertise dataplane_capability=v1-e2e");
+        }
+        const providerGrpcEndpointRaw = providerInfo?.card?.spec?.endpoints?.data_plane?.grpc || "";
+        const providerGrpcEndpoint = parseGrpcEndpoint(providerGrpcEndpointRaw);
+        // Dev certs are for CN=localhost; when connecting to 127.0.0.1 we must use serverName "localhost" for TLS.
+        const tlsServerName =
+          DATAPLANE_TLS_SERVER_NAME ||
+          (/^127\.0\.0\.1$|^localhost$/i.test(providerGrpcEndpoint.split(":")[0]) ? "localhost" : "");
+
+        const providerPubKeyB64 = providerInfo?.card?.metadata?.did_document?.verification_method?.[0]?.public_key_base64;
+        const providerAgreementKeyB64 = providerInfo?.card?.metadata?.did_document?.key_agreement?.[0]?.public_key_base64;
+        if (!providerPubKeyB64) {
+          throw new Error("Provider DID document missing public key");
+        }
+        if (!providerAgreementKeyB64) {
+          throw new Error("Provider DID document missing keyAgreement X25519 key");
+        }
+        const providerPublicKey = publicKeyFromBase64(providerPubKeyB64);
+        const dpClient = createDataPlaneClient(providerGrpcEndpoint, {
+          insecure: DATAPLANE_ALLOW_INSECURE,
+          caCertPath: DATAPLANE_TLS_CA_CERT_PATH,
+          clientCertPath: DATAPLANE_TLS_CLIENT_CERT_PATH,
+          clientKeyPath: DATAPLANE_TLS_CLIENT_KEY_PATH,
+          serverName: tlsServerName,
+        });
+
+        const consumerEph = createX25519Ephemeral();
+        const consumerEphPub = exportX25519PublicKeyBytes(consumerEph.publicKey);
+        // Ensures provider DID exposes a valid X25519 key for agreement.
+        const providerAgreementKey = importX25519PublicKeyBase64(providerAgreementKeyB64);
+        const didSharedSecret = crypto.diffieHellman({
+          privateKey: consumerEph.privateKey,
+          publicKey: providerAgreementKey,
+        });
+        if (!didSharedSecret || didSharedSecret.length === 0) {
+          throw new Error("Unable to derive shared secret using provider DID key agreement");
+        }
+        const consumerSigPayload = buildHandshakePayload(sessionId, CONSUMER_DID, consumerEphPub);
+        const consumerSig = signEd25519(consumerPrivateKey, consumerSigPayload);
+
+        const handshakeStart = nowMs();
+        const handshakeResp = await new Promise((resolve, reject) => {
+          dpClient.Handshake({
+            session_id: sessionId,
+            session_token: result.sessionToken,
+            consumer_ephemeral_pub: consumerEphPub,
+            consumer_did: CONSUMER_DID,
+            consumer_did_signature: consumerSig,
+          }, (err, response) => (err ? reject(err) : resolve(response)));
+        });
+        timings.handshake_ms = nowMs() - handshakeStart;
+
+        const providerSigPayload = buildHandshakePayload(
+          sessionId,
+          handshakeResp.provider_did,
+          handshakeResp.provider_ephemeral_pub
         );
-        const encrypted = encryptChunk({
-          key: sessionKey,
-          sequence: 1,
-          payloadBuffer: Buffer.from(JSON.stringify({ description: question }), "utf8"),
+        const providerSigValid = verifyEd25519(
+          providerPublicKey,
+          providerSigPayload,
+          Buffer.from(handshakeResp.provider_did_signature)
+        );
+        if (!providerSigValid) {
+          throw new Error("Provider handshake signature invalid");
+        }
+        const sessionKey = deriveSessionKey({
+          privateKey: consumerEph.privateKey,
+          peerPublicKeyBytes: handshakeResp.provider_ephemeral_pub,
+          sessionId,
         });
-        call.write({
-          ciphertext: encrypted.ciphertext,
-          nonce: encrypted.nonce,
-          sequence: encrypted.sequence,
-          is_final: encrypted.is_final,
-          algorithm: encrypted.algorithm,
-        });
-        call.end();
-      });
 
-      const answer = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("Timeout waiting for specialist response"));
-        }, RESULT_TIMEOUT_MS);
-        const stream = dpClient.Result({ session_id: sessionId });
-        stream.on("data", (chunk) => {
-          clearTimeout(timeout);
-          try {
-            const plaintext = decryptChunk({ key: sessionKey, chunk });
-            const data = JSON.parse(plaintext.toString("utf8"));
-            resolve(data.result ?? data.error ?? "(no response)");
-          } catch {
-            resolve("(invalid response)");
-          }
+        const transferMeta = new grpc.Metadata();
+        transferMeta.set("x-session-id", sessionId);
+        const transferStart = nowMs();
+        await new Promise((resolve, reject) => {
+          const call = dpClient.Transfer(
+            transferMeta,
+            (err, ack) => {
+              if (err) {
+                reject(err);
+                return;
+              }
+              if (!ack?.accepted) {
+                reject(new Error(ack?.error_message || "provider rejected transfer"));
+                return;
+              }
+              resolve();
+            }
+          );
+          const encrypted = encryptChunk({
+            key: sessionKey,
+            sequence: 1,
+            payloadBuffer: Buffer.from(JSON.stringify({ description: question }), "utf8"),
+          });
+          call.write({
+            ciphertext: encrypted.ciphertext,
+            nonce: encrypted.nonce,
+            sequence: encrypted.sequence,
+            is_final: encrypted.is_final,
+            algorithm: encrypted.algorithm,
+          });
+          call.end();
         });
-        stream.on("error", (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-        stream.on("end", () => {
-          clearTimeout(timeout);
-        });
-      });
+        timings.transfer_ack_ms = nowMs() - transferStart;
 
-      dpClient.close?.();
+        const resultStart = nowMs();
+        const answer = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Timeout waiting for specialist response"));
+          }, RESULT_TIMEOUT_MS);
+          let resolved = false;
+          const finish = (fn) => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timeout);
+            fn();
+          };
+          const stream = dpClient.Result({ session_id: sessionId });
+          stream.on("data", (chunk) => {
+            finish(() => {
+              try {
+                const plaintext = decryptChunk({ key: sessionKey, chunk });
+                const data = JSON.parse(plaintext.toString("utf8"));
+                resolve(data.result ?? data.error ?? "(no response)");
+              } catch {
+                resolve("(invalid response)");
+              }
+            });
+          });
+          stream.on("error", (err) => {
+            finish(() => reject(err));
+          });
+          stream.on("end", () => {
+            if (!resolved) {
+              finish(() => reject(new Error("Result stream ended without data (provider may have returned result_not_ready or handshake_required)")));
+            }
+          });
+        });
+        timings.result_wait_ms = nowMs() - resultStart;
 
-      return { success: true, result: answer };
+        dpClient.close?.();
+        timings.total_ms = nowMs() - totalStart;
+        console.log("[Consumer][timing]", JSON.stringify({ ...timings, outcome: "ok" }));
+        return { success: true, result: answer };
+      } catch (err) {
+        timings.total_ms = nowMs() - totalStart;
+        const msg = err?.message || String(err);
+        const code = err?.code ?? err?.details;
+        console.error("[Consumer] DataPlane error:", code || msg);
+        console.log("[Consumer][timing]", JSON.stringify({ ...timings, outcome: "error", error: code || msg }));
+        return { success: false, error: `DataPlane: ${code ? `${code} - ` : ""}${msg}`, result: null };
+      }
     },
   });
 
