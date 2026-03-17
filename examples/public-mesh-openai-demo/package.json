@@ -1,0 +1,11 @@
+{
+  "name": "public-mesh-openai-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --legacy-peer-deps --prefix provider && npm install --legacy-peer-deps --prefix consumer",
+    "run:provider": "npm run start --prefix provider",
+    "run:consumer": "npm run start --prefix consumer"
+  }
+}
