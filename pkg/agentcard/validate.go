@@ -29,6 +29,30 @@ func Validate(c *Card) error {
 	if !didOrgRe.MatchString(c.Metadata.Owner) {
 		return fmt.Errorf("metadata.owner must match did:mesh:org:<id>")
 	}
+	if c.Metadata.DIDDocument != nil {
+		if c.Metadata.DIDDocument.ID != c.Metadata.ID {
+			return fmt.Errorf("metadata.did_document.id must equal metadata.id")
+		}
+		if len(c.Metadata.DIDDocument.VerificationMethod) == 0 {
+			return fmt.Errorf("metadata.did_document.verification_method must be non-empty")
+		}
+		for i, vm := range c.Metadata.DIDDocument.VerificationMethod {
+			if strings.TrimSpace(vm.ID) == "" || strings.TrimSpace(vm.Type) == "" || strings.TrimSpace(vm.Controller) == "" {
+				return fmt.Errorf("metadata.did_document.verification_method[%d] requires id, type and controller", i)
+			}
+			if strings.TrimSpace(vm.PublicKeyBase64) == "" {
+				return fmt.Errorf("metadata.did_document.verification_method[%d].public_key_base64 is required", i)
+			}
+		}
+		for i, vm := range c.Metadata.DIDDocument.KeyAgreement {
+			if strings.TrimSpace(vm.ID) == "" || strings.TrimSpace(vm.Type) == "" || strings.TrimSpace(vm.Controller) == "" {
+				return fmt.Errorf("metadata.did_document.key_agreement[%d] requires id, type and controller", i)
+			}
+			if strings.TrimSpace(vm.PublicKeyBase64) == "" {
+				return fmt.Errorf("metadata.did_document.key_agreement[%d].public_key_base64 is required", i)
+			}
+		}
+	}
 	if len(c.Spec.Domains.Primary) == 0 {
 		return fmt.Errorf("spec.domains.primary is required and non-empty")
 	}

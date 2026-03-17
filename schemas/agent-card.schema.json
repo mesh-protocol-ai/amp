@@ -25,6 +25,42 @@
         },
         "labels": { "type": "object", "additionalProperties": { "type": "string" } },
         "annotations": { "type": "object", "additionalProperties": true }
+        ,
+        "did_document": {
+          "type": "object",
+          "required": ["id", "verification_method"],
+          "properties": {
+            "id": { "type": "string" },
+            "verification_method": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "type", "controller", "public_key_base64"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "type": "string" },
+                  "controller": { "type": "string" },
+                  "public_key_base64": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "key_agreement": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "type", "controller", "public_key_base64"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "type": "string" },
+                  "controller": { "type": "string" },
+                  "public_key_base64": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "spec": {

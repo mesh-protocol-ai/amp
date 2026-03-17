@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package amp.dataplane.v1;
+
+option go_package = "github.com/mesh-protocol-ai/amp/pkg/proto/amp/dataplane/v1;dataplanev1";
+
+// DataPlane — troca segura de dados entre consumer e provider (P2P).
+// MVP: Handshake + Transfer/Result sobre TLS; E2E encryption em fase posterior.
+service DataPlane {
+  // Handshake — troca de chaves efêmeras (ou no MVP apenas validação de session_token).
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // Transfer — envio de payload (cifrado em E2E ou em claro sobre TLS no MVP).
+  rpc Transfer(stream EncryptedChunk) returns (TransferAck);
+
+  // Result — recebimento de resultado.
+  rpc Result(ResultRequest) returns (stream EncryptedChunk);
+
+  // Streaming bidirecional para tasks longas (opcional no MVP).
+  rpc StreamingTask(stream EncryptedChunk) returns (stream EncryptedChunk);
+}
+
+message HandshakeRequest {
+  string session_id = 1;
+  string session_token = 2;      // JWT do match
+  bytes consumer_ephemeral_pub = 3; // X25519 public key (E2E phase)
+  string consumer_did = 4;
+  bytes consumer_did_signature = 5;
+}
+
+message HandshakeResponse {
+  bytes provider_ephemeral_pub = 1;
+  string provider_did = 2;
+  bytes provider_did_signature = 3;
+  optional TEEAttestation attestation = 4;
+}
+
+message TEEAttestation {
+  string tee_type = 1;
+  bytes attestation_document = 2;
+  bytes enclave_public_key = 3;
+  repeated bytes pcr_values = 4;
+}
+
+message EncryptedChunk {
+  bytes ciphertext = 1;
+  bytes nonce = 2;       // 12 bytes para AES-256-GCM
+  uint32 sequence = 3;
+  bool is_final = 4;
+  string algorithm = 5; // "AES-256-GCM" ou "plain" no MVP
+}
+
+message TransferAck {
+  bool accepted = 1;
+  uint32 chunks_received = 2;
+  optional string error_code = 3;
+  optional string error_message = 4;
+}
+
+message ResultRequest {
+  string session_id = 1;
+}

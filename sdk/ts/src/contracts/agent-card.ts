@@ -18,6 +18,21 @@ export interface AgentCardMetadata {
   owner: string;
   labels?: Record<string, string>;
   annotations?: Record<string, unknown>;
+  did_document?: {
+    id: string;
+    verification_method: Array<{
+      id: string;
+      type: string;
+      controller: string;
+      public_key_base64: string;
+    }>;
+    key_agreement?: Array<{
+      id: string;
+      type: string;
+      controller: string;
+      public_key_base64: string;
+    }>;
+  };
 }
 
 export interface AgentCardSpec {
@@ -78,6 +93,31 @@ export function validateAgentCard(card: AgentCard): void {
   }
   if (!card.metadata.owner || !DID_ORG_REGEX.test(card.metadata.owner)) {
     throw new Error('metadata.owner must match did:mesh:org:<id>');
+  }
+  if (card.metadata.did_document) {
+    if (card.metadata.did_document.id !== card.metadata.id) {
+      throw new Error('metadata.did_document.id must equal metadata.id');
+    }
+    if (!card.metadata.did_document.verification_method?.length) {
+      throw new Error('metadata.did_document.verification_method must be non-empty');
+    }
+    for (let i = 0; i < card.metadata.did_document.verification_method.length; i++) {
+      const vm = card.metadata.did_document.verification_method[i];
+      if (!vm.id?.trim() || !vm.type?.trim() || !vm.controller?.trim() || !vm.public_key_base64?.trim()) {
+        throw new Error(`metadata.did_document.verification_method[${i}] is invalid`);
+      }
+    }
+    if (card.metadata.did_document.key_agreement) {
+      if (!card.metadata.did_document.key_agreement.length) {
+        throw new Error("metadata.did_document.key_agreement must be non-empty when provided");
+      }
+      for (let i = 0; i < card.metadata.did_document.key_agreement.length; i++) {
+        const vm = card.metadata.did_document.key_agreement[i];
+        if (!vm.id?.trim() || !vm.type?.trim() || !vm.controller?.trim() || !vm.public_key_base64?.trim()) {
+          throw new Error(`metadata.did_document.key_agreement[${i}] is invalid`);
+        }
+      }
+    }
   }
   if (!card.spec?.domains?.primary?.length) {
     throw new Error('spec.domains.primary is required and non-empty');

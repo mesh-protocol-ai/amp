@@ -47,3 +47,30 @@ export {
   EVENT_TYPES,
 } from './cloudevents.js';
 export type { CloudEvent, AMPExtensions } from './cloudevents.js';
+
+export {
+  parseGrpcEndpoint,
+  createDataPlaneClient,
+  createGrpcServer,
+  createServerCredentials,
+  DataPlaneService,
+  grpc,
+} from './dataplane/grpc.js';
+
+export {
+  generateEd25519KeyPair,
+  loadEd25519PrivateKeyFromBase64,
+  exportEd25519PublicKeyBase64,
+  publicKeyFromBase64,
+  signEd25519,
+  verifyEd25519,
+  createX25519Ephemeral,
+  exportX25519PublicKeyBytes,
+  exportX25519PublicKeyBase64,
+  importX25519PublicKeyBytes,
+  importX25519PublicKeyBase64,
+  deriveSessionKey,
+  encryptChunk,
+  decryptChunk,
+  buildHandshakePayload,
+} from './dataplane/crypto.js';

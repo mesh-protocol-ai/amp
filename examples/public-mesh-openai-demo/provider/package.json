@@ -8,9 +8,13 @@
     "start": "node --env-file=../.env index.js"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0",
     "@nebulaos/core": "^0.2.6",
     "@nebulaos/openai": "^0.1.0",
     "@meshprotocol/sdk": "^0.1.0",
-    "nats": "^2.28.2"
+    "jsonwebtoken": "^9.0.2",
+    "nats": "^2.28.2",
+    "prom-client": "^15.1.3"
   }
 }

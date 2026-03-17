@@ -16,6 +16,7 @@ import (
 	"github.com/mesh-protocol-ai/amp/pkg/agentcard"
 	"github.com/mesh-protocol-ai/amp/pkg/cloudevents"
 	"github.com/mesh-protocol-ai/amp/pkg/events"
+	"github.com/mesh-protocol-ai/amp/pkg/session"
 	"github.com/nats-io/nats.go"
 )
 
@@ -30,6 +31,10 @@ func main() {
 		registryURL = "http://localhost:8080"
 	}
 	registryURL = strings.TrimSuffix(registryURL, "/")
+	sessionTokenSecret := []byte(strings.TrimSpace(os.Getenv("SESSION_TOKEN_SECRET")))
+	if len(sessionTokenSecret) == 0 {
+		log.Fatalf("SESSION_TOKEN_SECRET is required")
+	}
 
 	opts := []nats.Option{nats.Timeout(5 * time.Second)}
 	if natsToken != "" {
@@ -46,7 +51,7 @@ func main() {
 
 	// Subscribe to all capability requests
 	sub, err := nc.Subscribe("mesh.requests.>", func(msg *nats.Msg) {
-		handleRequest(ctx, msg, registryURL, nc)
+		handleRequest(ctx, msg, registryURL, sessionTokenSecret, nc)
 	})
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)
@@ -58,7 +63,7 @@ func main() {
 	log.Println("matching shutting down")
 }
 
-func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, nc *nats.Conn) {
+func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessionTokenSecret []byte, nc *nats.Conn) {
 	ev, err := cloudevents.ParseJSON(msg.Data)
 	if err != nil {
 		log.Printf("parse cloudevent: %v", err)
@@ -130,6 +135,17 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, nc *n
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	expires := now.Add(1 * time.Hour)
+	sessionToken, err := session.IssueToken(session.Claims{
+		SessionID:   sessionID,
+		ConsumerDID: consumerDID,
+		ProviderDID: selected.Metadata.ID,
+		ExpiresAt:   expires,
+	}, sessionTokenSecret, now)
+	if err != nil {
+		log.Printf("issue session token: %v", err)
+		publishReject(nc, requestID, consumerDID, "session_token_issue_failed")
+		return
+	}
 	maxLatency := 0
 	if reqData.Constraints != nil {
 		maxLatency = reqData.Constraints.MaxLatencyMs
@@ -149,7 +165,7 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, nc *n
 			SessionID:    sessionID,
 			CreatedAt:    now.Format(time.RFC3339),
 			ExpiresAt:    expires.Format(time.RFC3339),
-			SessionToken: "amp-mvp-" + sessionID,
+			SessionToken: sessionToken,
 		},
 	}
 

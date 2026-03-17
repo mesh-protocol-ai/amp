@@ -20,6 +20,20 @@ type Metadata struct {
 	Owner       string            `json:"owner"`
 	Labels      map[string]string  `json:"labels,omitempty"`
 	Annotations map[string]any    `json:"annotations,omitempty"`
+	DIDDocument *DIDDocument      `json:"did_document,omitempty"`
+}
+
+type DIDDocument struct {
+	ID                 string               `json:"id"`
+	VerificationMethod []VerificationMethod `json:"verification_method"`
+	KeyAgreement       []VerificationMethod `json:"key_agreement,omitempty"`
+}
+
+type VerificationMethod struct {
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	Controller      string `json:"controller"`
+	PublicKeyBase64 string `json:"public_key_base64"`
 }
 
 // Agent Card spec.
