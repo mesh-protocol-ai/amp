@@ -1,4 +1,4 @@
-# Agent Mesh Protocol (AMP) — MVP
+# Agent Mesh Protocol (AMP)
 
 Specification and reference implementation of the **Agent Mesh Protocol**: decentralized network of AI agents with discovery, matching and secure data plane.
 
@@ -67,6 +67,20 @@ In **[examples/nebula-mesh-demo/](./examples/nebula-mesh-demo/)** there are exam
 
 With the stack up (`docker compose up -d`), run the provider in one terminal and the consumer in another. Full documentation: [examples/nebula-mesh-demo/README.md](./examples/nebula-mesh-demo/README.md).
 
+### Demo: Enterprise multi-department mesh
+
+In **[examples/enterprise-mesh-demo/](./examples/enterprise-mesh-demo/)** a multi-department scenario shows an **Executive agent** querying HR, Finance and Legal specialists **in parallel** (`Promise.allSettled`) and consolidating the results into a single report — all coordinated through the AMP control plane.
+
+```
+executive → mesh → [hr-agent, finance-agent, legal-agent]  (parallel, ~380ms)
+                         ↓              ↓            ↓
+                    headcount       budget       compliance
+                         └──────────────────────────┘
+                                   report
+```
+
+Full documentation: [examples/enterprise-mesh-demo/README.md](./examples/enterprise-mesh-demo/README.md).
+
 ### Publish a request (NATS) and receive a match
 
 Matching subscribes to `mesh.requests.>`. Publish a CloudEvent of type `amp.capability.request` in a subject like `mesh.requests.demo.echo.global` with `data.task.domain`, `data.task.capability_id` etc. Matching consults the Registry, chooses a provider and publishes an `amp.capability.match` event in `mesh.matches`. Consumers and providers must subscribe to `mesh.matches` and filter by `parties.consumer` / `parties.provider`.
@@ -96,7 +110,7 @@ go vet ./...
 | Path | Description |
 |-----------|-----------|
 | `proto/` | Protobuf (Data Plane) Settings |
-| `schemes/` | JSON Schema (Agent Card) |
+| `schemas/` | JSON Schema (Agent Card) |
 | `pkg/` | Shared libs (cloudevents, did, agentcard, events) |
 | `services/registry/` | Agent Cards HTTP CRUD API |
 | `services/matching/` | Matching engine (request → match) |
