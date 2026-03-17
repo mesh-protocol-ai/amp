@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,10 +12,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		databaseURL = "postgres://amp:amp@localhost:5432/amp_registry?sslmode=disable"
-	}
+	databaseURL := getDatabaseURL()
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {
 		port = "8080"
@@ -51,4 +49,44 @@ func main() {
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// getDatabaseURL returns the DB connection string. If DATABASE_URL is set, use it.
+// Otherwise build from DATABASE_USER, DATABASE_PASSWORD, DATABASE_HOST, etc., so the
+// password is URL-encoded and special characters work.
+func getDatabaseURL() string {
+	if u := os.Getenv("DATABASE_URL"); u != "" {
+		return u
+	}
+	user := os.Getenv("DATABASE_USER")
+	password := os.Getenv("DATABASE_PASSWORD")
+	host := os.Getenv("DATABASE_HOST")
+	dbname := os.Getenv("DATABASE_NAME")
+	if user == "" {
+		user = "amp"
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	if dbname == "" {
+		dbname = "amp_registry"
+	}
+	port := os.Getenv("DATABASE_PORT")
+	if port == "" {
+		port = "5432"
+	}
+	sslMode := os.Getenv("DATABASE_SSLMODE")
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	// URL-encode user and password so special characters work
+	userInfo := url.UserPassword(user, password)
+	u := &url.URL{
+		Scheme:   "postgres",
+		User:     userInfo,
+		Host:     host + ":" + port,
+		Path:     "/" + dbname,
+		RawQuery: "sslmode=" + url.QueryEscape(sslMode),
+	}
+	return u.String()
 }

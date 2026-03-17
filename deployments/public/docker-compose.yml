@@ -51,7 +51,12 @@ services:
       dockerfile: services/registry/Dockerfile
     container_name: amp-registry
     environment:
-      DATABASE_URL: postgres://amp:${POSTGRES_PASSWORD}@postgres:5432/amp_registry?sslmode=disable
+      DATABASE_USER: amp
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: amp_registry
+      DATABASE_SSLMODE: disable
       HTTP_PORT: "8080"
     depends_on:
       postgres:
