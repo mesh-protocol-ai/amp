@@ -42,7 +42,7 @@ docker compose up -d
 
 - **NATS:** `nats://localhost:4222` (monitoring: http://localhost:8222)
 - **Registry:** http://localhost:8080
-- **Postgres:** localhost:5432 (user `amp`, password `amp`, db `amp_registry`)
+- **Postgres:** localhost:5432 (user `amp`, password from `POSTGRES_PASSWORD` env; db `amp_registry`). Set `POSTGRES_PASSWORD` in `.env` (see `.env.example`).
 
 ### Register an Agent Card
 

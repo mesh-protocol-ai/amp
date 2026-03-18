@@ -11,11 +11,13 @@ Thank you for contributing.
 ## Recommended flow
 
 1. Fork + dedicated branch.
-2. Run locally:
-   - `go test ./pkg/...`
+2. (Optional) Install pre-commit for secret scanning: `pip install pre-commit && pre-commit install` (gitleaks hook in `.pre-commit-config.yaml`).
+3. Run locally:
+   - `go test ./pkg/... ./services/...`
    - `go vet ./...`
-3. Update documentation when public behavior changes.
-4. Send PR with context of “why” the change.
+   - In `sdk/ts`: `npm run build && npm test`
+4. Update documentation when public behavior changes.
+5. Send PR with context of “why” the change.
 
 ## PR standards
 

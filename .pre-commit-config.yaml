@@ -1,0 +1,8 @@
+# Pre-commit hooks. Install: pip install pre-commit && pre-commit install
+# See https://pre-commit.com/
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.1
+    hooks:
+      - id: gitleaks
