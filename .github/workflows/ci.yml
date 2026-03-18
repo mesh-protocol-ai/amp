@@ -28,10 +28,33 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test ./pkg/... -count=1 -v
+        run: go test ./pkg/... ./services/... -count=1 -v
         env:
           # pkg/nats test skip if NATS not available
           NATS_URL: ""
 
       - name: Vet
         run: go vet ./...
+
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install and test SDK
+        run: |
+          cd sdk/ts && npm ci && npm run build && npm test
+
+  deploy-public:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deployments/public stack
+        run: |
+          cd deployments/public && docker compose build

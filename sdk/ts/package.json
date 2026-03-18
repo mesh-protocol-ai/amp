@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && node scripts/copy-proto.mjs"
+    "build": "tsc && node scripts/copy-proto.mjs",
+    "test": "node --test test/*.test.js"
   },
   "files": [
     "dist",

@@ -4,6 +4,8 @@ This example shows agents built with **@nebulaos/core** and **@nebulaos/openai**
 
 Main repository: [mesh_protocol](../) (Control Plane, Registry, Matching).
 
+**Reference example with automated tests:** [public-mesh-openai-demo](../public-mesh-openai-demo) — includes unit tests for SDK surface (security, dataplane) and is the recommended reference for integrating with the mesh.
+
 ---
 
 ## Demos available

@@ -4,6 +4,8 @@ This demo shows AMP in an **intra-company** scenario: specialized agents per dep
 
 > No API key required. Department agents use mock data. The AMP stack is the only prerequisite.
 
+**Reference example with automated tests:** [public-mesh-openai-demo](../public-mesh-openai-demo) — includes unit tests for SDK surface (security, dataplane) and is the recommended reference for integrating with the mesh.
+
 ---
 
 ## The concept

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,13 +10,23 @@ import (
 	"github.com/mesh-protocol-ai/amp/pkg/agentcard"
 )
 
+// storeInterface is satisfied by Store and by memStore in tests.
+type storeInterface interface {
+	Upsert(ctx context.Context, card *agentcard.Card, status string) error
+	Get(ctx context.Context, id string) (*agentcard.Card, string, error)
+	List(ctx context.Context, statusFilter string) ([]*agentcard.Card, error)
+	ListByDomainCapability(ctx context.Context, domain []string, capabilityID string) ([]*agentcard.Card, error)
+	UpdateStatus(ctx context.Context, id, status string) error
+	Delete(ctx context.Context, id string) error
+}
+
 // Server exposes the Registry HTTP API.
 type Server struct {
-	store *Store
+	store storeInterface
 }
 
 // NewServer creates the server.
-func NewServer(store *Store) *Server {
+func NewServer(store storeInterface) *Server {
 	return &Server{store: store}
 }
 

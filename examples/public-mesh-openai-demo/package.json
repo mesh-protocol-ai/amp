@@ -19,6 +19,7 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
+    "@meshprotocol/sdk": "file:../../sdk/ts",
     "nats": "^2.28.2"
   }
 }

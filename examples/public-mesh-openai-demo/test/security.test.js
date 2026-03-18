@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import {
   createChunkOpen,
   generateEd25519KeyPair,
   signEd25519,
   verifyEd25519,
-} from "../shared/security.js";
-import { validateSimpleToken } from "../shared/simple-token.js";
+  validateSimpleToken,
+  issueSimpleToken,
+} from "@meshprotocol/sdk";
 
 test("Ed25519: assinatura e verificação funcionam", () => {
   const { privateKey, publicKey } = generateEd25519KeyPair();
@@ -37,9 +37,8 @@ test("validateSimpleToken: token válido", () => {
   const sessionId = "s1";
   const consumerDid = "did:mesh:agent:c";
   const providerDid = "did:mesh:agent:p";
-  const payload = `${sessionId}|${consumerDid}|${providerDid}`;
-  const expected = crypto.createHmac("sha256", Buffer.from(secret, "utf8")).update(payload, "utf8").digest("base64url");
-  assert.equal(validateSimpleToken(expected, secret, sessionId, consumerDid, providerDid), true);
+  const token = issueSimpleToken(secret, sessionId, consumerDid, providerDid);
+  assert.equal(validateSimpleToken(token, secret, sessionId, consumerDid, providerDid), true);
 });
 
 test("validateSimpleToken: token inválido", () => {

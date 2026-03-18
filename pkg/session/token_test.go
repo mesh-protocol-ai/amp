@@ -1,3 +1,8 @@
+//go:build enterprise
+// +build enterprise
+
+// token_test.go tests JWT (Enterprise) session tokens. Build with -tags=enterprise when JWT implementation is present.
+
 package session
 
 import (

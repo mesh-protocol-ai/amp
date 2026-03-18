@@ -67,3 +67,9 @@ export {
   verifyEd25519,
   createChunkOpen,
 } from './dataplane/crypto.js';
+
+// Community (OPEN): simple HMAC session token (validate in provider; matching issues via pkg/session)
+export { issueSimpleToken, validateSimpleToken } from './session/simple.js';
+
+// Test/demo helpers (fixtures, example agent card, test session token)
+export { getExampleAgentCard, createTestSessionToken } from './testing/fixtures.js';

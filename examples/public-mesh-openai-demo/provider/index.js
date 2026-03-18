@@ -5,13 +5,12 @@
 
 import { Agent, InMemory } from "@nebulaos/core";
 import { OpenAI } from "@nebulaos/openai";
-import { MeshClient } from "@meshprotocol/sdk";
+import { MeshClient, validateSimpleToken } from "@meshprotocol/sdk";
 import agentCardJson from "./agent-card.json" with { type: "json" };
 import http from "node:http";
 import client from "prom-client";
 import { createGrpcServer, createServerCredentials, DataPlaneService, grpc } from "../shared/dataplane.js";
 import { createChunkOpen } from "../shared/security.js";
-import { validateSimpleToken } from "../shared/simple-token.js";
 
 const DEFAULT_HOST = "nats.meshprotocol.dev";
 const DEFAULT_PORT = "4222";

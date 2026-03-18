@@ -2,21 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/mesh-protocol-ai/amp/pkg/agentcard"
 	"github.com/mesh-protocol-ai/amp/pkg/cloudevents"
 	"github.com/mesh-protocol-ai/amp/pkg/events"
-	"github.com/mesh-protocol-ai/amp/pkg/session"
 	"github.com/nats-io/nats.go"
 )
 
@@ -33,11 +27,13 @@ func main() {
 	if registryURL == "" {
 		registryURL = "http://localhost:8080"
 	}
-	registryURL = strings.TrimSuffix(registryURL, "/")
 	sessionTokenSecret := []byte(strings.TrimSpace(os.Getenv("SESSION_TOKEN_SECRET")))
 	if len(sessionTokenSecret) == 0 {
 		log.Fatalf("SESSION_TOKEN_SECRET is required")
 	}
+
+	engine := &MatchEngine{SessionTokenSecret: sessionTokenSecret}
+	registry := newRegistryClient(registryURL)
 
 	opts := []nats.Option{nats.Timeout(5 * time.Second)}
 	if natsToken != "" {
@@ -54,7 +50,7 @@ func main() {
 
 	// Subscribe to all capability requests
 	sub, err := nc.Subscribe("mesh.requests.>", func(msg *nats.Msg) {
-		handleRequest(ctx, msg, registryURL, sessionTokenSecret, nc)
+		handleRequest(ctx, msg, engine, registry, nc)
 	})
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)
@@ -66,7 +62,7 @@ func main() {
 	log.Println("matching shutting down")
 }
 
-func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessionTokenSecret []byte, nc *nats.Conn) {
+func handleRequest(ctx context.Context, msg *nats.Msg, engine *MatchEngine, registry RegistryLister, nc *nats.Conn) {
 	ev, err := cloudevents.ParseJSON(msg.Data)
 	if err != nil {
 		log.Printf("parse cloudevent: %v", err)
@@ -89,89 +85,18 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessi
 		correlationID = requestID
 	}
 
-	// Query registry for candidates
-	candidates, err := listCandidates(ctx, registryURL, reqData.Task.Domain, reqData.Task.CapabilityID)
-	if err != nil {
-		log.Printf("registry list: %v", err)
-		publishReject(nc, requestID, consumerDID, "registry_error")
+	result := engine.SelectMatch(ctx, registry, &reqData, consumerDID, requestID, correlationID)
+
+	if result.RejectReason != "" {
+		publishReject(nc, requestID, consumerDID, result.RejectReason)
 		return
-	}
-
-	// Filter by data_residency (MVP: provider must declare at least one region in request list, or no constraint)
-	var filtered []*agentcard.Card
-	var dataResidency []string
-	if reqData.Constraints != nil {
-		dataResidency = reqData.Constraints.DataResidency
-	}
-	for _, c := range candidates {
-		if len(dataResidency) > 0 {
-			providerResidency := c.DataResidency()
-			if len(providerResidency) == 0 {
-				filtered = append(filtered, c)
-				continue
-			}
-			ok := false
-			for _, r := range dataResidency {
-				for _, pr := range providerResidency {
-					if r == pr {
-						ok = true
-						break
-					}
-				}
-			}
-			if !ok {
-				continue
-			}
-		}
-		filtered = append(filtered, c)
-	}
-
-	if len(filtered) == 0 {
-		publishReject(nc, requestID, consumerDID, "no_providers_available")
-		return
-	}
-
-	// Select one: MVP = first by lowest avg_latency_ms
-	selected := selectProvider(filtered)
-
-	// Build match (Community: simple HMAC token, security_level OPEN)
-	sessionID := uuid.Must(uuid.NewV7()).String()
-	now := time.Now().UTC()
-	expires := now.Add(1 * time.Hour)
-	sessionToken, err := session.IssueSimpleToken(sessionTokenSecret, sessionID, consumerDID, selected.Metadata.ID)
-	if err != nil {
-		log.Printf("issue session token: %v", err)
-		publishReject(nc, requestID, consumerDID, "session_token_issue_failed")
-		return
-	}
-	maxLatency := 0
-	if reqData.Constraints != nil {
-		maxLatency = reqData.Constraints.MaxLatencyMs
-	}
-	matchData := events.CapabilityMatchData{
-		RequestID:    requestID,
-		WinningBidID: "direct",
-		Parties: events.MatchParties{
-			Consumer: consumerDID,
-			Provider: selected.Metadata.ID,
-		},
-		AgreedTerms: events.AgreedTerms{
-			MaxLatencyMs:   maxLatency,
-			SecurityLevel: "OPEN",
-		},
-		Session: events.MatchSession{
-			SessionID:    sessionID,
-			CreatedAt:    now.Format(time.RFC3339),
-			ExpiresAt:    expires.Format(time.RFC3339),
-			SessionToken: sessionToken,
-		},
 	}
 
 	matchEv, err := cloudevents.NewEvent(
 		cloudevents.TypeCapabilityMatch,
 		"did:mesh:broker:local",
-		matchData,
-		cloudevents.AMPExtensions{CorrelationID: correlationID, SessionID: sessionID},
+		result.MatchData,
+		cloudevents.AMPExtensions{CorrelationID: correlationID, SessionID: result.MatchData.Session.SessionID},
 	)
 	if err != nil {
 		log.Printf("new match event: %v", err)
@@ -179,56 +104,11 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessi
 	}
 	payload, _ := cloudevents.SerializeJSON(matchEv)
 
-	// Publish to subject where consumer and provider can subscribe
-	subject := "mesh.matches"
-	if err := nc.Publish(subject, payload); err != nil {
+	if err := nc.Publish("mesh.matches", payload); err != nil {
 		log.Printf("publish match: %v", err)
 		return
 	}
-	log.Printf("match published request=%s provider=%s session=%s", requestID, selected.Metadata.ID, sessionID)
-}
-
-func listCandidates(ctx context.Context, baseURL string, domain []string, capabilityID string) ([]*agentcard.Card, error) {
-	url := baseURL + "/agents?"
-	if len(domain) > 0 {
-		url += "domain=" + strings.Join(domain, ",") + "&"
-	}
-	if capabilityID != "" {
-		url += "capability=" + capabilityID
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("registry returned %d", resp.StatusCode)
-	}
-	var out struct {
-		Agents []*agentcard.Card `json:"agents"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out.Agents, nil
-}
-
-// selectProvider chooses a provider (MVP: lowest avg_latency_ms).
-func selectProvider(cards []*agentcard.Card) *agentcard.Card {
-	if len(cards) == 0 {
-		return nil
-	}
-	best := cards[0]
-	for _, c := range cards[1:] {
-		if c.AvgLatencyMs() < best.AvgLatencyMs() {
-			best = c
-		}
-	}
-	return best
+	log.Printf("match published request=%s provider=%s session=%s", requestID, result.MatchData.Parties.Provider, result.MatchData.Session.SessionID)
 }
 
 func publishReject(nc *nats.Conn, requestID, consumerDID, reason string) {
