@@ -87,3 +87,14 @@ export function decryptChunk(input: { key: Buffer; chunk: { ciphertext: Buffer; 
 export function buildHandshakePayload(sessionId: string, did: string, ephPubBytes: Buffer): Buffer {
   return Buffer.from(`${sessionId}:${did}:${Buffer.from(ephPubBytes).toString("base64")}`, "utf8");
 }
+
+/** OPEN (Community): build a chunk with raw bytes, no encryption. algorithm = "none". */
+export function createChunkOpen(payload: Buffer, sequence = 1, isFinal = true): { ciphertext: Buffer; nonce: Buffer; sequence: number; is_final: boolean; algorithm: string } {
+  return {
+    ciphertext: payload,
+    nonce: Buffer.alloc(0),
+    sequence,
+    is_final: isFinal,
+    algorithm: "none",
+  };
+}

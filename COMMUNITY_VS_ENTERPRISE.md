@@ -6,6 +6,11 @@ This document defines the boundary between the **open source (Community)** editi
 
 Deliver a functional and auditable core for development, POCs and basic self-hosted use, without promises of enterprise operation.
 
+## Data plane (Community vs Enterprise)
+
+- **Community (OPEN):** Session token is a simple HMAC (no JWT). Handshake sends only `session_id` and `session_token`. Transfer/Result send payload as raw bytes (no E2E encryption); TLS only. Implemented in this repo: `pkg/session/simple.go`, matching with `IssueSimpleToken`, SDK with `createChunkOpen`, demo with `security_level: "OPEN"`.
+- **Enterprise (STANDARD):** Session token is JWT. Handshake includes ephemeral X25519 keys and Ed25519 signatures. Transfer/Result use AES-256-GCM (E2E). Implemented in a **private repository** that consumes this core (matching with JWT, SDK E2E crypto, provider/consumer with full handshake and encryption).
+
 ## Feature matrix
 
 | Area | Community (open source) | Enterprise (commercial) |
@@ -17,7 +22,7 @@ Deliver a functional and auditable core for development, POCs and basic self-hos
 | SDK | Base SDK (`register`, `request`, `listen`) | Enterprise SDK with enterprise auth and native observability |
 | AuthN/AuthZ | Basic for controlled environment | SSO (OIDC/SAML), RBAC/ABAC, policy engine |
 | Observability | Logs and basic metrics | Dashboards, distributed tracing, alerts and SLOs |
-| Security | Good baseline practices | KMS/HSM, key rotation, immutable trail, private networking |
+| Security | Good baseline practices (TLS, simple HMAC session token, no E2E) | KMS/HSM, E2E encryption (JWT + X25519 + AES-256-GCM), key rotation, immutable trail, private networking |
 | Compliance | Out of scope for Community | Corporate requirements (auditability and governance) |
 | Operation | No SLA, best effort | Contractual SLA, support, runbooks, DR and backup |
 | Support | Community (issues/discussions) | Dedicated support and agreed response times |

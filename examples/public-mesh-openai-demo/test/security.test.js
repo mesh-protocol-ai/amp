@@ -2,17 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {
-  buildHandshakePayload,
-  createX25519Ephemeral,
-  decryptChunk,
-  deriveSessionKey,
-  encryptChunk,
-  exportX25519PublicKeyBase64,
+  createChunkOpen,
   generateEd25519KeyPair,
-  importX25519PublicKeyBase64,
   signEd25519,
   verifyEd25519,
 } from "../shared/security.js";
+import { validateSimpleToken } from "../shared/simple-token.js";
 
 test("Ed25519: assinatura e verificação funcionam", () => {
   const { privateKey, publicKey } = generateEd25519KeyPair();
@@ -28,56 +23,25 @@ test("Ed25519: assinatura inválida com payload alterado", () => {
   assert.equal(verifyEd25519(publicKey, Buffer.from("payload-alterado", "utf8"), signature), false);
 });
 
-test("X25519+HKDF: ambos lados derivam mesma session key", () => {
-  const consumerEph = createX25519Ephemeral();
-  const providerEph = createX25519Ephemeral();
-  const consumerPub = providerEph.publicKey.export({ format: "der", type: "spki" });
-  const providerPub = consumerEph.publicKey.export({ format: "der", type: "spki" });
-  const sessionId = "session-test-123";
-
-  const keyA = deriveSessionKey({
-    privateKey: consumerEph.privateKey,
-    peerPublicKeyBytes: consumerPub,
-    sessionId,
-  });
-  const keyB = deriveSessionKey({
-    privateKey: providerEph.privateKey,
-    peerPublicKeyBytes: providerPub,
-    sessionId,
-  });
-  assert.deepEqual(Buffer.from(keyA), Buffer.from(keyB));
+test("createChunkOpen: payload direto, algorithm none", () => {
+  const payload = Buffer.from(JSON.stringify({ description: "2+2" }), "utf8");
+  const chunk = createChunkOpen(payload, 1, true);
+  assert.equal(chunk.algorithm, "none");
+  assert.deepEqual(Buffer.from(chunk.ciphertext), payload);
+  assert.equal(chunk.sequence, 1);
+  assert.equal(chunk.is_final, true);
 });
 
-test("X25519 key agreement: export/import base64 preserva material de chave", () => {
-  const pairA = createX25519Ephemeral();
-  const pairB = createX25519Ephemeral();
-  const b64 = exportX25519PublicKeyBase64(pairB.publicKey);
-  const imported = importX25519PublicKeyBase64(b64);
-  const s1 = crypto.diffieHellman({ privateKey: pairA.privateKey, publicKey: pairB.publicKey });
-  const s2 = crypto.diffieHellman({ privateKey: pairA.privateKey, publicKey: imported });
-  assert.deepEqual(s1, s2);
+test("validateSimpleToken: token válido", () => {
+  const secret = "test-secret";
+  const sessionId = "s1";
+  const consumerDid = "did:mesh:agent:c";
+  const providerDid = "did:mesh:agent:p";
+  const payload = `${sessionId}|${consumerDid}|${providerDid}`;
+  const expected = crypto.createHmac("sha256", Buffer.from(secret, "utf8")).update(payload, "utf8").digest("base64url");
+  assert.equal(validateSimpleToken(expected, secret, sessionId, consumerDid, providerDid), true);
 });
 
-test("AES-256-GCM: encrypt/decrypt round-trip", () => {
-  const key = crypto.randomBytes(32);
-  const plaintext = Buffer.from(JSON.stringify({ hello: "mesh" }), "utf8");
-  const chunk = encryptChunk({ key, sequence: 1, payloadBuffer: plaintext });
-  const decoded = decryptChunk({ key, chunk });
-  assert.equal(decoded.toString("utf8"), plaintext.toString("utf8"));
-});
-
-test("AES-256-GCM: falha ao decriptar com chave errada", () => {
-  const key = crypto.randomBytes(32);
-  const wrongKey = crypto.randomBytes(32);
-  const chunk = encryptChunk({
-    key,
-    sequence: 1,
-    payloadBuffer: Buffer.from("secret", "utf8"),
-  });
-  assert.throws(() => decryptChunk({ key: wrongKey, chunk }));
-});
-
-test("Handshake payload: formato determinístico", () => {
-  const payload = buildHandshakePayload("s1", "did:mesh:agent:a", Buffer.from([1, 2, 3]));
-  assert.equal(payload.toString("utf8"), "s1:did:mesh:agent:a:AQID");
+test("validateSimpleToken: token inválido", () => {
+  assert.equal(validateSimpleToken("wrong", "secret", "s1", "did:c", "did:p"), false);
 });

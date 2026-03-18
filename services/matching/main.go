@@ -134,16 +134,11 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessi
 	// Select one: MVP = first by lowest avg_latency_ms
 	selected := selectProvider(filtered)
 
-	// Build match
+	// Build match (Community: simple HMAC token, security_level OPEN)
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	expires := now.Add(1 * time.Hour)
-	sessionToken, err := session.IssueToken(session.Claims{
-		SessionID:   sessionID,
-		ConsumerDID: consumerDID,
-		ProviderDID: selected.Metadata.ID,
-		ExpiresAt:   expires,
-	}, sessionTokenSecret, now)
+	sessionToken, err := session.IssueSimpleToken(sessionTokenSecret, sessionID, consumerDID, selected.Metadata.ID)
 	if err != nil {
 		log.Printf("issue session token: %v", err)
 		publishReject(nc, requestID, consumerDID, "session_token_issue_failed")
@@ -161,8 +156,8 @@ func handleRequest(ctx context.Context, msg *nats.Msg, registryURL string, sessi
 			Provider: selected.Metadata.ID,
 		},
 		AgreedTerms: events.AgreedTerms{
-			MaxLatencyMs:  maxLatency,
-			SecurityLevel: "STANDARD",
+			MaxLatencyMs:   maxLatency,
+			SecurityLevel: "OPEN",
 		},
 		Session: events.MatchSession{
 			SessionID:    sessionID,

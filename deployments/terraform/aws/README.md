@@ -2,6 +2,25 @@
 
 Provisions a single EC2 instance with Docker installed, ready to run the AMP stack (NATS, Registry, Matching, Postgres) and 4 test agents.
 
+## Terraform state (important)
+
+**Do not commit `terraform.tfstate` or `terraform.tfstate.*`.** These files contain real infrastructure state (resource IDs, IPs, outputs) and are ignored via `.gitignore`.
+
+- Use a **remote backend** (e.g. S3 + DynamoDB for locking) so state is stored outside the repo. Example in `main.tf`:
+
+  ```hcl
+  terraform {
+    backend "s3" {
+      bucket         = "your-terraform-state-bucket"
+      key            = "amp-enterprise/terraform.tfstate"
+      region         = "us-east-1"
+      dynamodb_table = "terraform-locks"
+    }
+  }
+  ```
+
+- Run `terraform init` (and `terraform init -reconfigure` when switching to/from remote backend). Never commit state files.
+
 ## Prerequisites
 
 - AWS CLI configured (`aws configure`)

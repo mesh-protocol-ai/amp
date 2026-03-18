@@ -1,3 +1,4 @@
+// Community (OPEN): only Ed25519 for identity + createChunkOpen for raw bytes
 export {
   generateEd25519KeyPair,
   loadEd25519PrivateKeyFromBase64,
@@ -5,13 +6,5 @@ export {
   publicKeyFromBase64,
   signEd25519,
   verifyEd25519,
-  createX25519Ephemeral,
-  exportX25519PublicKeyBytes,
-  exportX25519PublicKeyBase64,
-  importX25519PublicKeyBytes,
-  importX25519PublicKeyBase64,
-  deriveSessionKey,
-  encryptChunk,
-  decryptChunk,
-  buildHandshakePayload,
+  createChunkOpen,
 } from "../../../sdk/ts/dist/dataplane/crypto.js";

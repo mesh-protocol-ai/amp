@@ -7,12 +7,9 @@
     "install:all": "npm install --legacy-peer-deps --prefix provider && npm install --legacy-peer-deps --prefix consumer",
     "run:provider": "npm run start --prefix provider",
     "run:consumer": "npm run start --prefix consumer",
-    "keys:consumer": "node scripts/generate-ed25519-keypair.js consumer",
-    "keys:provider": "node scripts/generate-ed25519-keypair.js provider",
     "certs:dev": "bash scripts/generate-dev-certs.sh",
     "test": "node --test test/*.test.js",
     "validate:dataplane": "cd consumer && node --env-file=../.env ../scripts/validate-dataplane-auth.js",
-    "test:dataplane": "cd consumer && node --env-file=../.env ../scripts/test-dataplane-with-token.js",
     "load:consumers": "node --env-file=.env scripts/load-consumers.js",
     "run:matching": "bash scripts/run-matching.sh",
     "obs:up": "sh -c '(docker compose -f observability/docker-compose.yml up -d || docker-compose -f observability/docker-compose.yml up -d)'",
@@ -22,7 +19,6 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
-    "jsonwebtoken": "^9.0.2",
     "nats": "^2.28.2"
   }
 }

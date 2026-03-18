@@ -48,14 +48,12 @@ async function main() {
     serverName: tlsServerName,
   });
 
+  // OPEN: Handshake with only session_id + session_token (fake token → expect reject)
   const result = await new Promise((resolve) => {
     client.Handshake(
       {
         session_id: "validate-fake-session",
         session_token: "fake-token",
-        consumer_ephemeral_pub: Buffer.alloc(32, 0),
-        consumer_did: "did:mesh:agent:validator",
-        consumer_did_signature: Buffer.alloc(64, 0),
       },
       (err, response) => resolve({ err, response })
     );

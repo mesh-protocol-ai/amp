@@ -57,6 +57,7 @@ export {
   grpc,
 } from './dataplane/grpc.js';
 
+// Community (OPEN): only Ed25519 for DID/identity; no E2E crypto exports
 export {
   generateEd25519KeyPair,
   loadEd25519PrivateKeyFromBase64,
@@ -64,13 +65,5 @@ export {
   publicKeyFromBase64,
   signEd25519,
   verifyEd25519,
-  createX25519Ephemeral,
-  exportX25519PublicKeyBytes,
-  exportX25519PublicKeyBase64,
-  importX25519PublicKeyBytes,
-  importX25519PublicKeyBase64,
-  deriveSessionKey,
-  encryptChunk,
-  decryptChunk,
-  buildHandshakePayload,
+  createChunkOpen,
 } from './dataplane/crypto.js';

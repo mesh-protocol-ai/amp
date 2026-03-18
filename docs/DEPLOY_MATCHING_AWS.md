@@ -2,7 +2,7 @@
 
 Este guia descreve como configurar o **matching na AWS** para que **consumidores** (qualquer pessoa com o token) e **provedores** (registrados no registry) usem o mesh sem rodar matching local.
 
-**Se o fluxo funcionava antes da implementação de segurança e passou a dar timeout no consumer:** o matching provavelmente não está subindo porque **`SESSION_TOKEN_SECRET`** não está definido no ambiente (o processo encerra na inicialização). Veja a [seção 8](#8-funcionava-antes-da-segurança-e-parou-timeout).
+**Se o consumer dá timeout:** o matching pode não estar subindo porque **`SESSION_TOKEN_SECRET`** não está definido no ambiente (o processo encerra na inicialização). Veja a [seção 8](#8-funcionava-antes-e-parou-timeout).
 
 ## Visão geral
 
@@ -23,7 +23,7 @@ O serviço de matching (Go em `services/matching`) deve rodar na AWS com as segu
 | `NATS_URL` | Sim | URL do NATS que **consumidores e provedores** usam. Ex.: `nats://nats.meshprotocol.dev:4222` ou o endpoint do seu NATS na AWS. |
 | `NATS_TOKEN` | Conforme o NATS | Token de autenticação do NATS. Deve ser o **mesmo** que você distribui para consumidores e que os provedores usam. |
 | `REGISTRY_URL` | Sim | Base URL do registry onde os provedores se registram. Ex.: `https://api.meshprotocol.dev` ou seu registry na AWS. Deve terminar **sem** barra. |
-| `SESSION_TOKEN_SECRET` | Sim | Segredo compartilhado **apenas com os provedores**. O matching assina o JWT do match com esse valor; o provedor valida no handshake. Gere um valor forte (ex.: 32 bytes em base64) e guarde em Secrets Manager. |
+| `SESSION_TOKEN_SECRET` | Sim | Segredo compartilhado **apenas com os provedores**. O matching gera o token de sessão (HMAC) com esse valor; o provedor valida no handshake (Community / OPEN). Gere um valor forte e guarde em Secrets Manager. |
 
 **Importante:** `NATS_URL` deve incluir o esquema, ex.: `nats://host:4222`. Se usar apenas `host:4222`, o cliente Go pode falhar; prefira `nats://...`.
 
@@ -64,7 +64,7 @@ Para alguém rodar apenas o **consumer** e receber resposta do mesh:
 - **NATS_URL** — o mesmo que o matching usa (ex.: `nats.meshprotocol.dev:4222` ou com esquema).
 - **NATS_TOKEN** — o token que você disponibiliza para uso do mesh (ex.: o mesmo do matching).
 - **REGISTRY_URL** — o mesmo do matching (ex.: `https://api.meshprotocol.dev`).
-- Chaves Ed25519 do consumidor, TLS/certs se o provedor usar TLS, etc., conforme o exemplo em `examples/public-mesh-openai-demo`.
+- TLS/certs se o provedor usar TLS, conforme o exemplo em `examples/public-mesh-openai-demo` (Community: OPEN, sem chaves Ed25519 no data plane).
 
 Eles **não** precisam de `SESSION_TOKEN_SECRET`.
 
@@ -112,9 +112,9 @@ Sem o mesmo `SESSION_TOKEN_SECRET`, o handshake no data plane falha (token invá
 
 | Quem | NATS_TOKEN | SESSION_TOKEN_SECRET |
 |------|------------|----------------------|
-| Matching (AWS) | Sim (igual aos clientes) | Sim (gera o JWT do match) |
+| Matching (AWS) | Sim (igual aos clientes) | Sim (gera o token HMAC do match) |
 | Consumer | Sim | Não precisa |
-| Provider | Sim | Sim (valida o JWT; deve ser igual ao do matching) |
+| Provider | Sim | Sim (valida o token; deve ser igual ao do matching) |
 
 Se o consumer der **timeout** (ex.: "Request timeout after 25000ms"), em geral:
 - o matching não está no mesmo NATS, ou
@@ -125,21 +125,21 @@ Logs do matching (e métricas, se houver) ajudam a ver se o request chegou e se 
 
 ---
 
-## 8. Funcionava antes da segurança e parou? (timeout)
+## 8. Funcionava antes e parou? (timeout)
 
-Depois da implementação do **session token (JWT)** no matching, o binário passou a exigir **`SESSION_TOKEN_SECRET`** na inicialização. Se essa variável **não estiver definida** no ambiente do matching na AWS, o processo faz `log.Fatalf("SESSION_TOKEN_SECRET is required")` e **nem chega a conectar no NATS** — ou seja, o matching não sobe.
+O matching exige **`SESSION_TOKEN_SECRET`** na inicialização (Community: token HMAC; Enterprise: JWT). Se essa variável **não estiver definida** no ambiente do matching na AWS, o processo faz `log.Fatalf("SESSION_TOKEN_SECRET is required")` e **nem chega a conectar no NATS** — o matching não sobe.
 
 Resultado: ninguém escuta `mesh.requests.>`, nenhum match é publicado, e o consumer fica em timeout.
 
 **O que fazer:**
 
 1. **Definir `SESSION_TOKEN_SECRET` no matching (AWS)**  
-   Use o mesmo valor em todo lugar onde o matching roda (ex.: ECS task definition, Lambda env, ou Secrets Manager injetado como variável). Valor sugerido: string em base64 de 32 bytes (ex.: `openssl rand -base64 32`).
+   Use o mesmo valor em todo lugar onde o matching roda (ex.: ECS task definition, Lambda env, ou Secrets Manager). Valor sugerido: string forte (ex.: `openssl rand -base64 32`).
 
 2. **Repassar o mesmo valor para os provedores**  
-   No `.env` do provider (ou no deployment do provider), configure o **mesmo** `SESSION_TOKEN_SECRET`. O matching assina o JWT do match com esse segredo; o provider valida com o mesmo segredo.
+   No `.env` do provider (ou no deployment do provider), configure o **mesmo** `SESSION_TOKEN_SECRET`. O matching gera o token do match com esse segredo; o provider valida com o mesmo segredo.
 
 3. **Redeployar o matching**  
-   Após configurar a variável, subir uma nova versão do matching (nova task, novo deploy, etc.) e conferir nos logs que não aparece mais "SESSION_TOKEN_SECRET is required" e que aparece "matching subscribed to mesh.requests.>".
+   Após configurar a variável, subir uma nova versão do matching e conferir nos logs que aparece "matching subscribed to mesh.requests.>".
 
-Depois disso, o consumer deve voltar a receber o match dentro do tempo limite (e o handshake no data plane deve aceitar o token).
+Depois disso, o consumer deve voltar a receber o match (e o handshake no data plane deve aceitar o token).

@@ -1,16 +1,18 @@
-# Public mesh + OpenAI demo
+# Public mesh + OpenAI demo (Community / OPEN)
 
-Example that uses **NATS** e **Registry** (ex.: meshprotocol.dev ou sua infra na AWS). Dois agentes com **OpenAI** via NebulaOS:
+Example that uses **NATS** and **Registry** (e.g. meshprotocol.dev or your own infra). Two agents with **OpenAI** via NebulaOS:
 
-- **Provider:** Math expert — registra `calculator` no registry, escuta matches e responde via LLM.
-- **Consumer:** Agente que pergunta uma conta; usa a tool para pedir ao mesh e devolve a resposta do especialista.
+- **Provider:** Math expert — registers `calculator` on the registry, listens for matches, answers via LLM.
+- **Consumer:** Agent that asks a math question; uses the tool to request from the mesh and returns the specialist’s answer.
 
-Para o consumer receber um match, um serviço de **matching** precisa estar inscrito no **mesmo NATS**. Em produção isso é o **matching na AWS**. Ver [Deploy do matching na AWS](../../docs/DEPLOY_MATCHING_AWS.md) para configurar a infra e fazer consumidores e provedores funcionarem.
+**Security level: OPEN** (Community): simple HMAC session token, gRPC over TLS, payload sent as raw bytes (no E2E encryption). For E2E (STANDARD) and enterprise features, see the Enterprise edition in a separate private repo.
+
+For the consumer to receive a match, a **matching** service must be subscribed on the **same NATS**. In production this is the **matching on AWS**. See [Deploy matching on AWS](../../docs/DEPLOY_MATCHING_AWS.md) for infra and env alignment.
 
 ## Prerequisites
 
 - Node 18+
-- **NATS_TOKEN** for the NATS server (e.g. meshprotocol.dev) — get it in [HOSTING.md](../../HOSTING.md)
+- **NATS_TOKEN** for the NATS server (e.g. meshprotocol.dev) — see [HOSTING.md](../../HOSTING.md)
 - **OPENAI_API_KEY**
 - **SESSION_TOKEN_SECRET** — same value in matching and provider (generate once, put in `.env` and in your matching deployment)
 - For **local matching**: Go and the mesh_protocol repo root (so `go run ./services/matching` can run)
@@ -20,15 +22,14 @@ Para o consumer receber um match, um serviço de **matching** precisa estar insc
 ```bash
 cd examples/public-mesh-openai-demo
 cp .env.example .env
-# Edit .env: NATS_TOKEN, OPENAI_API_KEY, SESSION_TOKEN_SECRET, provider/consumer Ed25519 keys, TLS paths
+# Edit .env: NATS_TOKEN, OPENAI_API_KEY, SESSION_TOKEN_SECRET, TLS paths if using TLS
 npm run install:all
-npm run keys:provider && npm run keys:consumer   # if not done yet
-npm run certs:dev                                 # for TLS data plane
+npm run certs:dev   # optional, for TLS data plane
 ```
 
 ## Run (full flow with local matching)
 
-If the consumer times out with “Request timeout after 25000ms”, no matching is delivering a match on your NATS. Run the **matching** locally so it receives the consumer’s request and publishes the match:
+If the consumer times out with “Request timeout after 25000ms”, no matching is delivering a match on your NATS. Run **matching** locally:
 
 1. **Terminal 1 — Matching** (leave running; requires Go and repo root):
 
@@ -36,7 +37,7 @@ If the consumer times out with “Request timeout after 25000ms”, no matching 
    npm run run:matching
    ```
 
-   Subscribes to `mesh.requests.>`, queries the registry, and publishes matches to `mesh.matches` using `SESSION_TOKEN_SECRET` from `.env`.
+   Subscribes to `mesh.requests.>`, queries the registry, publishes matches to `mesh.matches` using `SESSION_TOKEN_SECRET` from `.env` (simple HMAC token).
 
 2. **Terminal 2 — Provider** (leave running):
 
@@ -53,75 +54,64 @@ If the consumer times out with “Request timeout after 25000ms”, no matching 
    npm run run:consumer -- "What is 15 * 3?"
    ```
 
-   The consumer publishes a request, receives the match from the matching, then does Handshake + Transfer + Result over gRPC with the provider.
+   The consumer publishes a request, receives the match, then does Handshake (session_id + token) + Transfer + Result over gRPC with the provider (OPEN: raw bytes, no E2E encryption).
 
-## Run com matching na AWS
+## Run with matching on AWS
 
-Se o **matching já está rodando na AWS** (ou em outro host) no **mesmo NATS** que o demo:
+If **matching** is already running on AWS (or another host) on the **same NATS** as this demo:
 
-1. Configure o matching na AWS com as variáveis descritas em [DEPLOY_MATCHING_AWS.md](../../docs/DEPLOY_MATCHING_AWS.md) (NATS_URL, NATS_TOKEN, REGISTRY_URL, SESSION_TOKEN_SECRET).
-2. No `.env` do demo use o **mesmo** NATS_URL, NATS_TOKEN e REGISTRY_URL. No provider use o **mesmo** SESSION_TOKEN_SECRET que o matching na AWS.
-3. Rode só o provider e o consumer (sem matching local):
+1. Configure matching on AWS as in [DEPLOY_MATCHING_AWS.md](../../docs/DEPLOY_MATCHING_AWS.md) (NATS_URL, NATS_TOKEN, REGISTRY_URL, SESSION_TOKEN_SECRET).
+2. In the demo `.env` use the **same** NATS_URL, NATS_TOKEN and REGISTRY_URL. On the provider use the **same** SESSION_TOKEN_SECRET as the matching on AWS.
+3. Run only the provider and consumer (no local matching):
 
    ```bash
-   # Terminal 1
    npm run run:provider
-   # Terminal 2
    npm run run:consumer
    ```
 
-Assim qualquer pessoa com o mesmo NATS_TOKEN e REGISTRY_URL pode rodar o consumer e ser atendida pelo seu matching na AWS e pelos provedores registrados.
+## Validate data plane (TLS + auth)
 
-## Observability (Prometheus + Grafana with P99)
+With the provider running:
 
-Com o provider rodando, você pode subir um Grafana pronto com dashboard provisionado:
+```bash
+npm run validate:dataplane
+```
+
+Expect: Handshake with a fake token is rejected (session_not_found or invalid_session_token). That confirms TLS and gRPC connectivity.
+
+## Observability (Prometheus + Grafana)
+
+With the provider running:
 
 ```bash
 npm run obs:up
 ```
 
-- Grafana: `http://localhost:3000` (user: `admin`, senha: `admin`)
+- Grafana: `http://localhost:3000` (user: `admin`, password: `admin`)
 - Prometheus: `http://localhost:9090`
 - Dashboard: **Mesh Provider Latency & Errors**
-
-Painéis incluídos:
-- P50/P95/**P99** de `llm_execute`
-- P50/P95/**P99** de `transfer_total`
-- P50/P95/**P99** de `handshake`
-- **P99 por subetapa** de handshake (`session_lookup`, `jwt_verify`, `consumer_registry_fetch`, etc.)
-- **P99 por subetapa** de processing (`parse_payload`, `agent_add_message`, `llm_execute`, `build_response_payload`, `encrypt_result`)
-- taxa de falhas por motivo (handshake e transfer)
-
-Para encerrar:
 
 ```bash
 npm run obs:down
 ```
 
-Observação: esse dashboard usa as métricas expostas pelo provider em `:9095/metrics`.
-
-## Load test simples (spawn de consumers)
-
-Para gerar volume e estabilizar P95/P99:
+## Load test (spawn consumers)
 
 ```bash
-# total=30, concorrencia=6
-npm run load:consumers -- 30 6 "Quanto e 22 + 18 ^ 4?"
+npm run load:consumers -- 30 6 "What is 22 + 18?"
 ```
 
-Saída:
-- resumo com avg/p50/p95/p99 por etapa do consumer (`match_ms`, `handshake_ms`, `transfer_ack_ms`, etc.)
-- relatório JSON salvo em `observability/results/load-<timestamp>.json`
+Output: summary with avg/p50/p95/p99 and JSON report under `observability/results/`.
 
 ## Env vars
 
-| Variable         | Example / default                    | Description                    |
-|------------------|--------------------------------------|--------------------------------|
-| NATS_URL         | `nats.meshprotocol.dev:4222`        | NATS host:port (no scheme)     |
-| NATS_TOKEN       | *(required)*                         | Token do NATS (mesmo do matching na AWS) |
-| REGISTRY_URL     | `https://api.meshprotocol.dev`      | Registry API (mesmo do matching) |
-| SESSION_TOKEN_SECRET | *(required no provider)*        | Mesmo valor configurado no **matching na AWS**; ver [DEPLOY_MATCHING_AWS.md](../../docs/DEPLOY_MATCHING_AWS.md) |
-| OPENAI_API_KEY   | *(required)*                         | OpenAI key for both agents     |
-| OPENAI_MODEL     | `gpt-5-nano`                         | Optional model override        |
+| Variable              | Example / default              | Description |
+|-----------------------|--------------------------------|-------------|
+| NATS_URL              | `nats.meshprotocol.dev:4222`   | NATS host:port (no scheme) |
+| NATS_TOKEN            | *(required)*                  | NATS token (same as matching on AWS) |
+| REGISTRY_URL          | `https://api.meshprotocol.dev`| Registry API (same as matching) |
+| SESSION_TOKEN_SECRET  | *(required on provider)*      | Same value as **matching on AWS**; see [DEPLOY_MATCHING_AWS.md](../../docs/DEPLOY_MATCHING_AWS.md) |
+| OPENAI_API_KEY        | *(required)*                  | OpenAI key for both agents |
+| OPENAI_MODEL          | `gpt-5-nano`                  | Optional model override |
 
-Os scripts carregam `.env` pelo runner. Para o fluxo com matching na AWS, todas as variáveis acima (NATS, REGISTRY, SESSION_TOKEN_SECRET) devem estar alinhadas com o que está configurado no matching.
+For the flow with matching on AWS, NATS, REGISTRY and SESSION_TOKEN_SECRET must match the matching deployment.
