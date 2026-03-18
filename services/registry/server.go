@@ -22,18 +22,48 @@ type storeInterface interface {
 
 // Server exposes the Registry HTTP API.
 type Server struct {
-	store storeInterface
+	store      storeInterface
+	writeToken string // non-empty → required on all mutating requests
 }
 
 // NewServer creates the server.
-func NewServer(store storeInterface) *Server {
-	return &Server{store: store}
+// writeToken is optional: if set, every mutating request (POST/PATCH/PUT/DELETE)
+// must carry `Authorization: Bearer <writeToken>`. Set via REGISTRY_WRITE_TOKEN.
+func NewServer(store storeInterface, writeToken string) *Server {
+	return &Server{store: store, writeToken: writeToken}
+}
+
+// requireWriteAuth rejects the request with 401 when write auth is configured
+// and the bearer token is missing or does not match.
+// Returns true if the request is allowed to proceed.
+func (s *Server) requireWriteAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.writeToken == "" {
+		return true // auth not configured — allow (dev/local mode)
+	}
+	const prefix = "Bearer "
+	auth := r.Header.Get("Authorization")
+	if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "missing or malformed Authorization header (expected: Bearer <token>)",
+		})
+		return false
+	}
+	if auth[len(prefix):] != s.writeToken {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "invalid registry write token",
+		})
+		return false
+	}
+	return true
 }
 
 // Register (POST /agents) - creates or updates an Agent Card.
 func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireWriteAuth(w, r) {
 		return
 	}
 	var card agentcard.Card
@@ -111,6 +141,9 @@ func (s *Server) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.requireWriteAuth(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
@@ -143,6 +176,9 @@ func (s *Server) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Delete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireWriteAuth(w, r) {
 		return
 	}
 	id := r.PathValue("id")

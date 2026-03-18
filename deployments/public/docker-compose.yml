@@ -58,6 +58,10 @@ services:
       DATABASE_NAME: amp_registry
       DATABASE_SSLMODE: disable
       HTTP_PORT: "8080"
+      # Required: protects POST/PATCH/DELETE from unauthorized writes.
+      REGISTRY_WRITE_TOKEN: ${REGISTRY_WRITE_TOKEN}
+      # Set to 1 to enforce all security checks at startup (recommended for production).
+      AMP_SAFE_MODE: ${AMP_SAFE_MODE:-0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +80,7 @@ services:
       REGISTRY_URL: http://registry:8080
       SESSION_TOKEN_SECRET: ${SESSION_TOKEN_SECRET}
       BID_WINDOW_MS: "2000"
+      AMP_SAFE_MODE: ${AMP_SAFE_MODE:-0}
     depends_on:
       nats:
         condition: service_healthy

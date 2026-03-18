@@ -27,9 +27,18 @@ func main() {
 	if registryURL == "" {
 		registryURL = "http://localhost:8080"
 	}
+	safeMode := strings.TrimSpace(os.Getenv("AMP_SAFE_MODE")) == "1"
+
 	sessionTokenSecret := []byte(strings.TrimSpace(os.Getenv("SESSION_TOKEN_SECRET")))
 	if len(sessionTokenSecret) == 0 {
 		log.Fatalf("SESSION_TOKEN_SECRET is required")
+	}
+
+	if safeMode {
+		if natsToken == "" {
+			log.Fatalf("FATAL: AMP_SAFE_MODE=1 requires NATS_TOKEN to be set.")
+		}
+		log.Println("AMP_SAFE_MODE=1: production security checks passed")
 	}
 
 	engine := &MatchEngine{SessionTokenSecret: sessionTokenSecret}

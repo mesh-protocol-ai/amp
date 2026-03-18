@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -24,7 +25,21 @@ func main() {
 	}
 	defer store.Close()
 
-	srv := NewServer(store)
+	safeMode := strings.TrimSpace(os.Getenv("AMP_SAFE_MODE")) == "1"
+	writeToken := strings.TrimSpace(os.Getenv("REGISTRY_WRITE_TOKEN"))
+
+	if safeMode && writeToken == "" {
+		log.Fatalf("FATAL: AMP_SAFE_MODE=1 requires REGISTRY_WRITE_TOKEN to be set. " +
+			"Generate one with: openssl rand -base64 32")
+	}
+	if writeToken == "" {
+		log.Println("WARNING: REGISTRY_WRITE_TOKEN not set — write endpoints are open (dev/local mode). " +
+			"Set REGISTRY_WRITE_TOKEN or AMP_SAFE_MODE=1 before exposing this registry publicly.")
+	} else {
+		log.Println("registry write auth: enabled (REGISTRY_WRITE_TOKEN)")
+	}
+
+	srv := NewServer(store, writeToken)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.Health)
 	mux.HandleFunc("POST /agents", srv.Register)
