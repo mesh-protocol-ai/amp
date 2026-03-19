@@ -30,6 +30,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: amp-postgres
+    ports:
+      - "5432:5432"   # internal only (registry connects to it)
     environment:
       POSTGRES_USER: amp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
