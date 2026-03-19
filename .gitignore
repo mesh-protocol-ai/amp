@@ -61,3 +61,4 @@ examples/public-mesh-openai-demo/certs/
 
 # Enterprise bundle (publish to private repo only)
 enterprise/
+website/
