@@ -57,6 +57,21 @@ export {
   grpc,
 } from './dataplane/grpc.js';
 
+export { DataPlaneServer } from './dataplane/server.js';
+export { DataPlaneConsumerClient } from './dataplane/consumer.js';
+export { createDataPlaneObservability } from './dataplane/metrics.js';
+export { resolveProviderDataPlaneEndpoint } from './dataplane/provider.js';
+export { resolveNatsUrl } from './nats-url.js';
+export type { ResolveNatsUrlOptions } from './nats-url.js';
+export type { DataPlaneObservability } from './dataplane/metrics.js';
+export type { DataPlaneServerMetricsHooks, SessionStats } from './dataplane/server.js';
+export type { DataPlaneConsumerMetricsHooks, CallMeta } from './dataplane/consumer.js';
+export type {
+  ResolveProviderDataPlaneOptions,
+  ResolvedProviderDataPlaneEndpoint,
+  RegistryAuth,
+} from './dataplane/provider.js';
+
 // Community (OPEN): only Ed25519 for DID/identity; no E2E crypto exports
 export {
   generateEd25519KeyPair,

@@ -5,42 +5,20 @@
 
 import { Agent, InMemory } from "@nebulaos/core";
 import { OpenAI } from "@nebulaos/openai";
-import { MeshClient, validateSimpleToken } from "@meshprotocol/sdk";
+import { MeshClient, startRelayTunnel, DataPlaneServer, createServerCredentials, createDataPlaneObservability, resolveNatsUrl } from "@meshprotocol/sdk";
 import agentCardJson from "./agent-card.json" with { type: "json" };
 import http from "node:http";
-import client from "prom-client";
-import { createGrpcServer, createServerCredentials, DataPlaneService, grpc } from "../shared/dataplane.js";
-import { createChunkOpen } from "../shared/security.js";
+// DataPlaneServer will handle Handshake / Transfer / Result lifecycle.
 
-const DEFAULT_HOST = "nats.meshprotocol.dev";
-const DEFAULT_PORT = "4222";
-
-function getNatsServerUrl() {
-  const raw = (process.env.NATS_URL || "").trim();
-  let host = DEFAULT_HOST;
-  let port = DEFAULT_PORT;
-  if (raw.startsWith("nats://")) {
-    try {
-      const u = new URL(raw);
-      if (u.hostname && u.hostname.includes(".")) {
-        host = u.hostname;
-        port = u.port || DEFAULT_PORT;
-      }
-      return `nats://${host}:${port}`;
-    } catch (_) {}
-  }
-  if (raw.includes(".")) {
-    const [h, p] = raw.split(":");
-    if (h) host = h;
-    if (p && /^\d+$/.test(p)) port = p;
-  }
-  return `nats://${host}:${port}`;
-}
-
-const NATS_SERVER = getNatsServerUrl();
+const NATS_SERVER = resolveNatsUrl(process.env.NATS_URL, { defaultHost: "nats.meshprotocol.dev" });
 const REGISTRY_URL = process.env.REGISTRY_URL || "https://api.meshprotocol.dev";
 const DATAPLANE_BIND = (process.env.DATAPLANE_BIND || "0.0.0.0:50051").trim();
 const DATAPLANE_PUBLIC_ENDPOINT = (process.env.DATAPLANE_PUBLIC_ENDPOINT || "").trim();
+// When RELAY_HOST is set the provider connects to the relay instead of requiring
+// a public port. RELAY_HOST takes precedence over DATAPLANE_PUBLIC_ENDPOINT.
+const RELAY_HOST         = (process.env.RELAY_HOST || "").trim();
+const RELAY_CONTROL_PORT = Number(process.env.RELAY_CONTROL_PORT || 7000);
+const RELAY_DATA_PORT    = Number(process.env.RELAY_DATA_PORT    || 7001);
 const SESSION_TOKEN_SECRET = (process.env.SESSION_TOKEN_SECRET || "").trim();
 const DATAPLANE_ALLOW_INSECURE = (process.env.DATAPLANE_ALLOW_INSECURE || "").trim() === "1";
 const DATAPLANE_TLS_CA_CERT_PATH = (process.env.DATAPLANE_TLS_CA_CERT_PATH || "").trim();
@@ -93,30 +71,10 @@ Reply ONLY with the numeric result or simplified expression, no long explanation
 Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   });
 
-  const sessions = new Map();
   const providerDid = agentCardJson.metadata.id;
 
-  const register = new client.Registry();
-  client.collectDefaultMetrics({ register, prefix: "mesh_provider_" });
-  const handshakeCounter = new client.Counter({
-    name: "mesh_provider_dataplane_handshake_total",
-    help: "Total handshake attempts by outcome and reason",
-    labelNames: ["outcome", "reason"],
-    registers: [register],
-  });
-  const transferCounter = new client.Counter({
-    name: "mesh_provider_dataplane_transfer_total",
-    help: "Total transfer attempts by outcome and reason",
-    labelNames: ["outcome", "reason"],
-    registers: [register],
-  });
-  const phaseLatency = new client.Histogram({
-    name: "mesh_provider_dataplane_phase_duration_seconds",
-    help: "Latency by dataplane phase",
-    labelNames: ["phase"],
-    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
-    registers: [register],
-  });
+  const observability = createDataPlaneObservability({ prefix: "mesh_provider_" });
+  const { register, handshakeCounter, transferCounter, phaseLatency, bytesCounter } = observability;
   const metricsServer = http.createServer(async (req, res) => {
     if (req.url !== "/metrics") {
       res.writeHead(404);
@@ -134,147 +92,48 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   metricsServer.listen(METRICS_PORT, () => {
     console.log(`[MathExpert] Prometheus metrics exposed on :${METRICS_PORT}/metrics`);
   });
-  const grpcServer = createGrpcServer();
-
-  grpcServer.addService(DataPlaneService.service, {
-    Handshake: async (call, callback) => {
-      const endLatency = phaseLatency.startTimer({ phase: "handshake" });
-      try {
-        const req = call.request || {};
-        const session = sessions.get(req.session_id);
-        if (!session) {
-          handshakeCounter.inc({ outcome: "failed", reason: "session_not_found" });
-          callback({ code: grpc.status.NOT_FOUND, message: "session_not_found" });
-          return;
-        }
-        const valid = validateSimpleToken(
-          req.session_token,
-          SESSION_TOKEN_SECRET,
-          req.session_id,
-          session.consumerDid,
-          providerDid
-        );
-        if (!valid) {
-          handshakeCounter.inc({ outcome: "failed", reason: "invalid_session_token" });
-          callback({ code: grpc.status.UNAUTHENTICATED, message: "invalid_session_token" });
-          return;
-        }
-        session.handshakeOk = true;
-        session.lastSequence = 0;
-        handshakeCounter.inc({ outcome: "ok", reason: "none" });
-        callback(null, {
-          provider_ephemeral_pub: Buffer.alloc(0),
-          provider_did: providerDid,
-          provider_did_signature: Buffer.alloc(0),
-        });
-      } catch (err) {
-        handshakeCounter.inc({ outcome: "failed", reason: "internal_error" });
-        callback({ code: grpc.status.INTERNAL, message: err?.message || "internal_error" });
-      } finally {
-        endLatency();
-      }
-    },
-    Transfer: (call, callback) => {
-      const endLatency = phaseLatency.startTimer({ phase: "transfer" });
-      const md = call.metadata.get("x-session-id") ?? call.metadata.get("X-Session-Id");
-      const raw = Array.isArray(md) ? md[0] : md;
-      const sessionId = raw != null && raw !== "" ? String(raw) : "";
-      if (!sessionId) {
-        console.warn("[MathExpert] Transfer metadata missing x-session-id");
-      }
-      const session = sessions.get(sessionId);
-      if (!session || !session.handshakeOk) {
-        transferCounter.inc({ outcome: "failed", reason: "handshake_required" });
-        endLatency();
-        callback({ code: grpc.status.UNAUTHENTICATED, message: "handshake_required" });
-        return;
-      }
-      const chunks = [];
-      call.on("data", (chunk) => {
-        const sequence = Number(chunk.sequence || 0);
-        if (sequence <= session.lastSequence) {
-          call.emit("error", { code: grpc.status.PERMISSION_DENIED, message: "replay_detected" });
-          return;
-        }
-        session.lastSequence = sequence;
-        chunks.push(Buffer.from(chunk.ciphertext || []));
-      });
-      call.on("error", () => {
-        transferCounter.inc({ outcome: "failed", reason: "stream_error" });
-        endLatency();
-      });
-      call.on("end", async () => {
-        try {
-          const payloadRaw = Buffer.concat(chunks).toString("utf8");
-          const payload = JSON.parse(payloadRaw);
-          const question = String(payload.description || payload.question || "").trim();
-          if (!question) {
-            transferCounter.inc({ outcome: "failed", reason: "empty_question" });
-            endLatency();
-            callback(null, { accepted: false, chunks_received: chunks.length, error_code: "EMPTY_QUESTION", error_message: "empty question" });
-            return;
-          }
-          await agent.addMessage({ role: "user", content: question });
-          const result = await agent.execute();
-          const answer = (result.content && typeof result.content === "string")
-            ? result.content.trim()
-            : "(no response)";
-          const responsePayload = Buffer.from(JSON.stringify({ result: answer }), "utf8");
-          session.resultChunk = createChunkOpen(responsePayload, session.lastSequence + 1, true);
-          session.lastSequence += 1;
-          transferCounter.inc({ outcome: "ok", reason: "none" });
-          endLatency();
-          callback(null, { accepted: true, chunks_received: chunks.length });
-        } catch (err) {
-          transferCounter.inc({ outcome: "failed", reason: "process_error" });
-          endLatency();
-          callback({ code: grpc.status.INTERNAL, message: `process_error: ${err?.message}` });
-        }
-      });
-    },
-    Result: (call) => {
-      const endLatency = phaseLatency.startTimer({ phase: "result" });
-      const req = call.request || {};
-      const session = sessions.get(req.session_id);
-      if (!session || !session.handshakeOk) {
-        call.emit("error", { code: grpc.status.UNAUTHENTICATED, message: "handshake_required" });
-        endLatency();
-        return;
-      }
-      if (!session.resultChunk) {
-        call.emit("error", { code: grpc.status.FAILED_PRECONDITION, message: "result_not_ready" });
-        endLatency();
-        return;
-      }
-      call.write(session.resultChunk);
-      call.end();
-      endLatency();
-    },
-    StreamingTask: (stream) => {
-      stream.emit("error", { code: grpc.status.UNIMPLEMENTED, message: "not_implemented" });
-    },
+  // DataPlane server: use SDK helper to reduce boilerplate for Handshake/Transfer/Result
+  const dpServer = new DataPlaneServer({ sessionTokenSecret: SESSION_TOKEN_SECRET, providerDid, metrics: { handshakeCounter, transferCounter, phaseLatency, bytesCounter } });
+  dpServer.onTask(async (payloadBuf) => {
+    const payloadRaw = payloadBuf.toString('utf8');
+    const payload = JSON.parse(payloadRaw);
+    const question = String(payload.description || payload.question || '').trim();
+    if (!question) {
+      throw new Error('empty_question');
+    }
+    await agent.addMessage({ role: 'user', content: question });
+    const result = await agent.execute();
+    const answer = (result.content && typeof result.content === 'string') ? result.content.trim() : '(no response)';
+    return Buffer.from(JSON.stringify({ result: answer }), 'utf8');
   });
 
-  await new Promise((resolve, reject) => {
-    const serverCreds = createServerCredentials({
-      insecure: DATAPLANE_ALLOW_INSECURE,
-      caCertPath: DATAPLANE_TLS_CA_CERT_PATH,
-      serverCertPath: DATAPLANE_TLS_SERVER_CERT_PATH,
-      serverKeyPath: DATAPLANE_TLS_SERVER_KEY_PATH,
-      requireClientCert: DATAPLANE_TLS_REQUIRE_CLIENT_CERT,
-    });
-    grpcServer.bindAsync(DATAPLANE_BIND, serverCreds, (err) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      grpcServer.start();
-      resolve();
-    });
+  const serverCreds = createServerCredentials({
+    insecure: DATAPLANE_ALLOW_INSECURE,
+    caCertPath: DATAPLANE_TLS_CA_CERT_PATH,
+    serverCertPath: DATAPLANE_TLS_SERVER_CERT_PATH,
+    serverKeyPath: DATAPLANE_TLS_SERVER_KEY_PATH,
+    requireClientCert: DATAPLANE_TLS_REQUIRE_CLIENT_CERT,
   });
-  console.log(
-    `[MathExpert] DataPlane gRPC listening at ${DATAPLANE_BIND} (tls=${DATAPLANE_ALLOW_INSECURE ? "off" : "on"})`
-  );
+
+  await dpServer.start(DATAPLANE_BIND, serverCreds);
+  console.log(`[MathExpert] DataPlane gRPC listening at ${DATAPLANE_BIND} (tls=${DATAPLANE_ALLOW_INSECURE ? 'off' : 'on'})`);
+
+  // Determine data plane public address: relay takes precedence over static endpoint.
+  let dataplaneGrpcAddress = DATAPLANE_PUBLIC_ENDPOINT;
+  let relayTunnel = null;
+  if (RELAY_HOST) {
+    const localPort = parseInt(DATAPLANE_BIND.split(":").pop() || "50051", 10);
+    relayTunnel = await startRelayTunnel({
+      relayHost: RELAY_HOST,
+      controlPort: RELAY_CONTROL_PORT,
+      dataPort: RELAY_DATA_PORT,
+      agentDID: agentCardJson.metadata.id,
+      localGrpcPort: localPort,
+      onDisconnect: (err) => console.warn("[MathExpert] Relay disconnected:", err?.message),
+    });
+    dataplaneGrpcAddress = relayTunnel.grpcAddress;
+    console.log(`[MathExpert] Relay tunnel active → ${dataplaneGrpcAddress}`);
+  }
 
   console.log("[MathExpert] Registering on public registry...");
   const cardToRegister = JSON.parse(JSON.stringify(agentCardJson));
@@ -282,8 +141,8 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
     ...(cardToRegister.metadata.annotations || {}),
     dataplane_capability: "v1-open",
   };
-  if (DATAPLANE_PUBLIC_ENDPOINT) {
-    cardToRegister.spec.endpoints.data_plane.grpc = DATAPLANE_PUBLIC_ENDPOINT;
+  if (dataplaneGrpcAddress) {
+    cardToRegister.spec.endpoints.data_plane.grpc = dataplaneGrpcAddress;
   }
   const reg = await mesh.register(cardToRegister);
   console.log("[MathExpert] Registered:", reg.id, reg.status);
@@ -291,21 +150,15 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   await mesh.startHeartbeat(30_000);
 
   await mesh.listen(async (match) => {
-    sessions.set(match.sessionId, {
-      sessionId: match.sessionId,
-      sessionToken: match.sessionToken,
-      consumerDid: match.parties.consumer,
-      providerDid: match.parties.provider,
-      handshakeOk: false,
-      resultChunk: null,
-    });
-    console.log("[MathExpert] Match received, session prepared:", match.sessionId);
+    dpServer.addSession({ sessionId: match.sessionId, sessionToken: match.sessionToken, consumerDid: match.parties.consumer });
+    console.log('[MathExpert] Match received, session prepared:', match.sessionId);
   });
 
   process.on("SIGINT", async () => {
     console.log("\n[MathExpert] Shutting down...");
     metricsServer.close();
-    await new Promise((resolve) => grpcServer.tryShutdown(resolve));
+    await dpServer.close();
+    if (relayTunnel) relayTunnel.close();
     await mesh.close();
     process.exit(0);
   });

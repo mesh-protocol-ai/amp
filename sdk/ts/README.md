@@ -36,6 +36,53 @@ if (result.kind === 'match') {
 }
 ```
 
+## Data plane observability (Prometheus)
+
+`@meshprotocol/sdk` agora oferece helpers opcionais para métricas de DataPlane (Handshake / Transfer / fase de processamento) via `prom-client`.
+
+- `createDataPlaneObservability({ prefix?: string, register?: client.Registry })`
+- `DataPlaneServerOptions.metrics` (hooks compatíveis com clientes do `prom-client`)
+- `DataPlaneConsumerOptions.metrics`
+
+Exemplo provider:
+
+```js
+import { DataPlaneServer, createDataPlaneObservability, createServerCredentials } from '@meshprotocol/sdk';
+import http from 'node:http';
+
+const { register, handshakeCounter, transferCounter, phaseLatency } = createDataPlaneObservability({ prefix: 'mesh_provider_' });
+
+const metricsServer = http.createServer(async (req, res) => {
+  if (req.url !== '/metrics') {
+    res.writeHead(404);
+    res.end('not found');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': register.contentType });
+  res.end(await register.metrics());
+});
+metricsServer.listen(9095);
+
+const dpServer = new DataPlaneServer({
+  sessionTokenSecret: process.env.SESSION_TOKEN_SECRET,
+  providerDid: 'did:mesh:provider:xyz',
+  metrics: { handshakeCounter, transferCounter, phaseLatency },
+});
+
+// ... register on mesh, listen for matches, addSession etc ...
+```
+
+Em `DataPlaneServer`, métricas são atualizadas automaticamente:
+- handshake success/failure + reason
+- transfer success/failure + reason
+- fases: handshake, transfer, processing
+
+## Provider data-plane resolution helper
+
+`resolveProviderDataPlaneEndpoint` simplifica o caminho de consumo: basta informar o DID do provider, a URL do registry e as credenciais (token/API key) que o helper já faz o `GET /agents/:id`, valida a card e retorna o `data_plane.grpc` com um `serverName` pronto para o `DataPlaneConsumerClient`.
+
+Importar `RegistryAuth`/`ResolveProviderDataPlaneOptions` permite sobrescrever `tlsServerName`, passar `fetch` customizado (útil em testes) ou anexar um `AbortSignal`.
+
 ## Community (OPEN) session token
 
 In the **Community** edition (security level `OPEN`), the session token is a simple HMAC, not a JWT. The format is:

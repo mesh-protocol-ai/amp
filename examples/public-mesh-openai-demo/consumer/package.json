@@ -12,7 +12,7 @@
     "@grpc/proto-loader": "^0.8.0",
     "@nebulaos/core": "^0.2.6",
     "@nebulaos/openai": "^0.1.0",
-    "@meshprotocol/sdk": "^0.1.4",
+    "@meshprotocol/sdk": "^0.1.7",
     "nats": "^2.28.2",
     "zod": "^3.23.0"
   }

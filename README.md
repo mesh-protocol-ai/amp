@@ -133,6 +133,10 @@ go test ./pkg/...
 
 `examples/enterprise-mesh-demo/` shows an Executive agent querying HR, Finance, and Legal specialists in parallel and consolidating the result. All coordination happens through AMP — no direct calls between agents.
 
+### Data plane metrics support
+
+The SDK now supports a built-in observability helper (`createDataPlaneObservability`) e2e for Prometheus metrics in DataPlaneServer and DataPlaneConsumerClient. The `examples/public-mesh-openai-demo` provider shows this in action via `metricsServer` at `:9095/metrics`.
+
 ```
 executive → mesh → [hr, finance, legal]  (parallel, ~380ms)
                        ↓       ↓       ↓

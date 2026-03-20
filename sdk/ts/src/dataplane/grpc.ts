@@ -37,18 +37,51 @@ const packageDef = protoLoader.loadSync(protoPath, {
 const loaded = grpc.loadPackageDefinition(packageDef) as any;
 const DataPlaneService = loaded.amp.dataplane.v1.DataPlane;
 
-export function parseGrpcEndpoint(endpoint: string): string {
+export interface ParsedGrpcEndpoint {
+  /** host:port ready to pass to gRPC channel constructor */
+  target: string;
+  /**
+   * Whether the endpoint scheme explicitly requests insecure transport.
+   * - `true`  → scheme was `grpc://`  (plain TCP, no TLS)
+   * - `false` → scheme was `grpcs://` or absent (TLS)
+   *
+   * Use this to drive `createDataPlaneClient` when the caller has not set
+   * `DATAPLANE_ALLOW_INSECURE` explicitly.
+   */
+  schemeInsecure: boolean;
+}
+
+/**
+ * Parse a gRPC endpoint URL into its target string and TLS hint.
+ *
+ * Supported forms:
+ *   grpc://host:port   → insecure (scheme == "grpc")
+ *   grpcs://host:port  → TLS      (scheme == "grpcs")
+ *   host:port          → TLS by default (no scheme)
+ */
+export function parseGrpcEndpoint(endpoint: string): string;
+export function parseGrpcEndpoint(endpoint: string, structured: true): ParsedGrpcEndpoint;
+export function parseGrpcEndpoint(
+  endpoint: string,
+  structured?: true,
+): string | ParsedGrpcEndpoint {
   const raw = String(endpoint || "").trim();
   if (!raw) {
     throw new Error("gRPC endpoint is empty");
   }
+  let target: string;
+  let schemeInsecure: boolean;
   if (raw.startsWith("grpc://")) {
-    return raw.replace("grpc://", "");
+    target = raw.slice("grpc://".length);
+    schemeInsecure = true;
+  } else if (raw.startsWith("grpcs://")) {
+    target = raw.slice("grpcs://".length);
+    schemeInsecure = false;
+  } else {
+    target = raw;
+    schemeInsecure = false; // no scheme → assume TLS
   }
-  if (raw.startsWith("grpcs://")) {
-    return raw.replace("grpcs://", "");
-  }
-  return raw;
+  return structured ? { target, schemeInsecure } : target;
 }
 
 function readFileIfExists(filePath: string): Buffer | null {
@@ -61,6 +94,11 @@ function readFileIfExists(filePath: string): Buffer | null {
 export function createDataPlaneClient(
   endpoint: string,
   options: {
+    /**
+     * Force insecure (plain TCP) transport.
+     * When omitted the scheme in `endpoint` is used as a hint:
+     *   `grpc://`  → insecure, `grpcs://` or no scheme → TLS.
+     */
     insecure?: boolean;
     caCertPath?: string;
     clientCertPath?: string;
@@ -68,9 +106,10 @@ export function createDataPlaneClient(
     serverName?: string;
   } = {},
 ): any {
-  const target = parseGrpcEndpoint(endpoint);
+  const { target, schemeInsecure } = parseGrpcEndpoint(endpoint, true);
   const {
-    insecure = false,
+    // If caller didn't set insecure explicitly, fall back to the scheme hint.
+    insecure = schemeInsecure,
     caCertPath = "",
     clientCertPath = "",
     clientKeyPath = "",

@@ -1,0 +1,16 @@
+{
+    "metadata": {
+      "id": "CONSUMER_DID",
+      "name": "PublicDemoConsumer",
+      "version": "1.0.0",
+      "owner": "did:mesh:org:demo"
+    },
+    "spec": {
+      "domains": { "primary": ["demo", "consumer"] },
+      "capabilities": [{ "id": "requester", "description": "Consumer identity registration only" }],
+      "endpoints": {
+        "control_plane": { "nats_subject": "mesh.agents.demo.consumer" },
+        "data_plane": { "grpc": "grpc://127.0.0.1:0" }
+      }
+    }
+  }

@@ -48,6 +48,17 @@ export interface RelayTunnelOptions {
   heartbeatIntervalMs?: number;
   /** Called when the control connection drops unexpectedly. */
   onDisconnect?: (err?: Error) => void;
+  /**
+   * URI scheme to prefix the returned `grpcAddress`.
+   *
+   * - `'grpc'`  (default) — plain TCP / insecure. Recommended for relay because
+   *   the relay is a transparent TCP proxy: TLS certificates issued for the
+   *   provider's own hostname are not valid for the relay's hostname, so TLS
+   *   verification would always fail on the consumer side.
+   * - `'grpcs'` — use only when the relay performs TLS termination and holds a
+   *   certificate valid for `relayHost`.
+   */
+  grpcScheme?: 'grpc' | 'grpcs';
 }
 
 export interface RelayTunnelHandle {
@@ -109,9 +120,10 @@ export function startRelayTunnel(options: RelayTunnelOptions): Promise<RelayTunn
           if (!control.destroyed) control.write('PING\n');
         }, heartbeatIntervalMs);
 
+        const scheme = options.grpcScheme ?? 'grpc';
         resolve({
           assignedPort,
-          grpcAddress: `${relayHost}:${assignedPort}`,
+          grpcAddress: `${scheme}://${relayHost}:${assignedPort}`,
           close() {
             if (hbInterval) clearInterval(hbInterval);
             control.destroy();

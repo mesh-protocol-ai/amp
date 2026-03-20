@@ -83,6 +83,21 @@ Expect: Handshake with a fake token is rejected (session_not_found or invalid_se
 
 ## Observability (Prometheus + Grafana)
 
+This example now uses the SDK helper `createDataPlaneObservability()` and passes its counters into `DataPlaneServer`.
+
+Provider snippet:
+
+```js
+import { createDataPlaneObservability, DataPlaneServer } from '@meshprotocol/sdk';
+
+const { register, handshakeCounter, transferCounter, phaseLatency } = createDataPlaneObservability({ prefix: 'mesh_provider_' });
+const dpServer = new DataPlaneServer({
+  sessionTokenSecret: process.env.SESSION_TOKEN_SECRET,
+  providerDid: agentCardJson.metadata.id,
+  metrics: { handshakeCounter, transferCounter, phaseLatency },
+});
+```
+
 With the provider running:
 
 ```bash
