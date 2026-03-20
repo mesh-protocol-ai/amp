@@ -1,6 +1,6 @@
 {
     "metadata": {
-      "id": "CONSUMER_DID",
+      "id": "did:mesh:agent:consumer",
       "name": "PublicDemoConsumer",
       "version": "1.0.0",
       "owner": "did:mesh:org:demo"

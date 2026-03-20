@@ -157,6 +157,7 @@ export class DataPlaneServer {
             session.stats.processing_ms = Date.now() - processingStart;
             session.stats.bytes_sent = resultBuf.length;
             this.metrics?.bytesCounter?.inc?.({ direction: 'sent' }, resultBuf.length);
+            session.resultChunk = createChunkOpen(resultBuf, (session.lastSequence || 0) + 1, true);
             session.lastSequence = (session.lastSequence || 0) + 1;
             completeTransfer('success', 'ok');
             callback(null, { accepted: true, chunks_received: chunksReceived });
