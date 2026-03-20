@@ -1,14 +1,16 @@
 # Matching na AWS — fazer o mesh funcionar para consumidores e provedores
 
+Para a evolução do control plane em produção, incluindo subjects direcionados, heartbeat e rollout por fases, veja [docs/CONTROL_PLANE_EVOLUTION.md](./CONTROL_PLANE_EVOLUTION.md) e [docs/CONTROL_PLANE_CHECKLIST.md](./CONTROL_PLANE_CHECKLIST.md).
+
 Este guia descreve como configurar o **matching na AWS** para que **consumidores** (qualquer pessoa com o token) e **provedores** (registrados no registry) usem o mesh sem rodar matching local.
 
 **Se o consumer dá timeout:** o matching pode não estar subindo porque **`SESSION_TOKEN_SECRET`** não está definido no ambiente (o processo encerra na inicialização). Veja a [seção 8](#8-funcionava-antes-e-parou-timeout).
 
 ## Visão geral
 
-- **Consumidores** publicam requests em `mesh.requests.<domain>.<region>` e escutam em `mesh.matches`.
-- O **matching** (AWS) escuta `mesh.requests.>`, consulta o **registry**, escolhe um provedor e publica o match em `mesh.matches`.
-- **Provedores** escutam `mesh.matches`, recebem o match e aceitam conexões gRPC dos consumidores.
+- **Consumidores** publicam requests em `mesh.requests.<domain>.<region>`. No SDK atual, o retorno vem primeiro por request-reply e também pode chegar pelos paths de compatibilidade `mesh.matches.<consumer_id>` e `mesh.matches`.
+- O **matching** (AWS) escuta `mesh.requests.>`, consulta o **registry**, escolhe um provedor, responde no `reply` do request quando houver, e também publica em `mesh.matches.<consumer_id>`, `mesh.matches.<provider_id>` e no legado `mesh.matches`.
+- **Provedores** recebem matches pelo SDK via subject direcionado. Durante o rollout, `mesh.matches` ainda existe como caminho de compatibilidade.
 
 Tudo depende de **NATS**, **Registry** e **Matching** usarem a mesma configuração (mesmo NATS, mesmo registry, mesmo segredo de token de sessão para provedores).
 
@@ -24,6 +26,9 @@ O serviço de matching (Go em `services/matching`) deve rodar na AWS com as segu
 | `NATS_TOKEN` | Conforme o NATS | Token de autenticação do NATS. Deve ser o **mesmo** que você distribui para consumidores e que os provedores usam. |
 | `REGISTRY_URL` | Sim | Base URL do registry onde os provedores se registram. Ex.: `https://api.meshprotocol.dev` ou seu registry na AWS. Deve terminar **sem** barra. |
 | `SESSION_TOKEN_SECRET` | Sim | Segredo compartilhado **apenas com os provedores**. O matching gera o token de sessão (HMAC) com esse valor; o provedor valida no handshake (Community / OPEN). Gere um valor forte e guarde em Secrets Manager. |
+| `HEARTBEAT_TTL_SECONDS` | Não | TTL da presença em segundos. Default atual: `90`. Se o provedor não publicar heartbeat dentro dessa janela, ele pode deixar de ser elegível para match. |
+| `MATCHING_CACHE_TTL_SECONDS` | Não | TTL do cache local de candidatos vindos do Registry. Default atual: `60`. |
+| `MATCHING_CACHE_REFRESH_SECONDS` | Não | Intervalo de refresh usado pelo cache local do matching. Default atual: `30`. |
 
 **Importante:** `NATS_URL` deve incluir o esquema, ex.: `nats://host:4222`. Se usar apenas `host:4222`, o cliente Go pode falhar; prefira `nats://...`.
 
@@ -36,7 +41,14 @@ Consumidores, provedores e matching precisam usar o **mesmo** NATS:
 - Se você usa o NATS público (ex.: meshprotocol.dev), o matching na AWS deve conectar com o **mesmo** `NATS_URL` e `NATS_TOKEN` que os usuários.
 - Se você tem NATS na AWS, consumidores e provedores devem usar esse endpoint e o token que você definir.
 
-Assim, quando um consumidor publica em `mesh.requests.demo.math.global`, o matching (inscrito em `mesh.requests.>`) recebe a mensagem e publica o match em `mesh.matches`, e o consumidor (inscrito em `mesh.matches`) recebe o match.
+Assim, quando um consumidor publica em `mesh.requests.demo.math.global`, o matching (inscrito em `mesh.requests.>`) recebe a mensagem e responde por um destes caminhos:
+
+- `reply` do próprio request, quando o cliente usa request-reply
+- `mesh.matches.<consumer_id>`
+- `mesh.matches.<provider_id>` para notificação do provedor
+- `mesh.matches` como compatibilidade temporária de rollout
+
+O SDK atual já esconde essa compatibilidade. Consumidor e provedor não precisam montar subscriptions manuais se estiverem usando `MeshClient`.
 
 ---
 
@@ -66,6 +78,8 @@ Para alguém rodar apenas o **consumer** e receber resposta do mesh:
 - **REGISTRY_URL** — o mesmo do matching (ex.: `https://api.meshprotocol.dev`).
 - TLS/certs se o provedor usar TLS, conforme o exemplo em `examples/public-mesh-openai-demo` (Community: OPEN, sem chaves Ed25519 no data plane).
 
+Se o consumer usa o SDK atual, ele não precisa escutar `mesh.matches` manualmente. O `request()` já faz request-reply e mantém os fallbacks de compatibilidade durante o rollout.
+
 Eles **não** precisam de `SESSION_TOKEN_SECRET`.
 
 ---
@@ -79,7 +93,22 @@ Para um provedor receber matches e atender consumidores:
 - **SESSION_TOKEN_SECRET** — **o mesmo** que está configurado no matching na AWS. Você deve repassar esse valor de forma segura (ex.: outro secret no Secrets Manager, ou entrega segura ao dono do provedor).
 - **DATAPLANE_PUBLIC_ENDPOINT** — URL gRPC onde o consumidor consegue conectar (ex.: `grpcs://meu-provider.aws.com:443`). Se o provedor estiver atrás de um ALB na AWS, use o endpoint do ALB.
 
+Se o matching atual estiver com filtro de presença ativo, o provedor também precisa publicar heartbeat periodicamente para continuar elegível.
+
 Sem o mesmo `SESSION_TOKEN_SECRET`, o handshake no data plane falha (token inválido).
+
+### 5.1 Heartbeat no MVP atual
+
+Contrato mínimo documentado para o heartbeat atual:
+
+- **Subject:** `mesh.agents.heartbeat.<agent_id_sanitized>`
+- **Payload JSON:** `{"did":"did:mesh:agent:provider-1","timestamp":"2026-03-19T12:00:00Z"}`
+
+Observações:
+
+- O matching também aceita heartbeat em formato CloudEvent por compatibilidade.
+- No SDK TypeScript atual, o provider deve chamar `mesh.startHeartbeat()` explicitamente; isso ainda não acontece automaticamente nos exemplos.
+- `amp.agent.register` e `amp.agent.deregister` continuam sendo itens de roadmap e não fazem parte obrigatória do MVP atual.
 
 ---
 
@@ -99,6 +128,7 @@ Sem o mesmo `SESSION_TOKEN_SECRET`, o handshake no data plane falha (token invá
 
 4. **Provedores**
    - [ ] Usam o mesmo `SESSION_TOKEN_SECRET` do matching.
+   - [ ] Publicam heartbeat periódico se o matching estiver filtrando presença.
    - [ ] `DATAPLANE_PUBLIC_ENDPOINT` é acessível pelos consumidores (e se for TLS, certificados/CA corretos).
 
 5. **Teste ponta a ponta**
@@ -119,7 +149,8 @@ Sem o mesmo `SESSION_TOKEN_SECRET`, o handshake no data plane falha (token invá
 Se o consumer der **timeout** (ex.: "Request timeout after 25000ms"), em geral:
 - o matching não está no mesmo NATS, ou
 - o matching não está recebendo o request (NATS_URL/token errados), ou
-- o matching não está publicando em `mesh.matches` (erro ao consultar registry ou ao publicar).
+- o matching não está respondendo no `reply` do request nem publicando nos subjects de compatibilidade, ou
+- o provider não está elegível porque ficou sem heartbeat recente.
 
 Logs do matching (e métricas, se houver) ajudam a ver se o request chegou e se o match foi publicado.
 

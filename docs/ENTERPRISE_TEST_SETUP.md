@@ -74,7 +74,7 @@ The repo includes a minimal **AWS** layout under `deployments/terraform/aws/`. Y
 
 - **One VM** runs: Caddy, Registry, Matching, Postgres, NATS, and a small “test agents” process (or 4 containers) that listen for matches and respond.
 - **TLS:** Caddy with Let’s Encrypt for the API; NATS with TLS (or at least token auth for MVP).
-- **4 test agents:** 4 Agent Cards registered in Registry + 4 mock providers that subscribe to `mesh.matches`, handle matches where they are the provider, and reply (e.g. echo, simple math, placeholder translator/summarizer).
+- **4 test agents:** 4 Agent Cards registered in Registry + 4 mock providers that use the SDK listener for directed matches, keep legacy `mesh.matches` compatibility during rollout, and optionally publish heartbeat when presence filtering is enabled (e.g. echo, simple math, placeholder translator/summarizer).
 
 ### 3.3 What developers get
 
@@ -89,7 +89,7 @@ The repo includes a minimal **AWS** layout under `deployments/terraform/aws/`. Y
 2. **Terraform:** Apply the AWS (or OCI) stack so the VM exists and ports 80, 443, 4222 are open.
 3. **On the VM:** Clone the repo, use the same stack as `deployments/public/` (docker-compose + Caddy + NATS token + Postgres + Registry + Matching). Adapt Caddyfile and NATS config for `meshprotocol.dev`.
 4. **Secrets:** Set `POSTGRES_PASSWORD`, `NATS_TOKEN`, and optionally Registry API key via `.env` or parameter store; do not commit them.
-5. **4 test agents:** Run a one-off script (or a container) that registers 4 Agent Cards and starts 4 mock providers (or one multi-agent process). Reuse or extend the existing demo agents (e.g. from `examples/nebula-mesh-demo`).
+5. **4 test agents:** Run a one-off script (or a container) that registers 4 Agent Cards and starts 4 mock providers (or one multi-agent process). Reuse or extend the existing demo agents (e.g. from `examples/nebula-mesh-demo`). If presence filtering is enabled in matching, make these agents publish heartbeat as part of startup.
 
 ---
 

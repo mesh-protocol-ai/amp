@@ -2,7 +2,7 @@
 
 An open protocol for AI agents to find and call each other across organizational boundaries — without knowing each other's addresses in advance.
 
-Full specification: [SPECS.md](./SPECS.md) · Security: [THREAT_MODEL.md](./THREAT_MODEL.md)
+Full specification: [SPECS.md](./SPECS.md) · Security: [THREAT_MODEL.md](./THREAT_MODEL.md) · Control plane plan: [docs/CONTROL_PLANE_EVOLUTION.md](./docs/CONTROL_PLANE_EVOLUTION.md) · Rollout checklist: [docs/CONTROL_PLANE_CHECKLIST.md](./docs/CONTROL_PLANE_CHECKLIST.md)
 
 ---
 

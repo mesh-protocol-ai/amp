@@ -9,6 +9,6 @@
   },
   "dependencies": {
     "@nebulaos/core": "^0.2.6",
-    "@meshprotocol/sdk": "^0.1.0"
+    "@meshprotocol/sdk": "^0.1.4"
   }
 }

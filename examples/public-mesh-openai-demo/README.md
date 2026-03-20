@@ -37,7 +37,7 @@ If the consumer times out with “Request timeout after 25000ms”, no matching 
    npm run run:matching
    ```
 
-   Subscribes to `mesh.requests.>`, queries the registry, publishes matches to `mesh.matches` using `SESSION_TOKEN_SECRET` from `.env` (simple HMAC token).
+   Subscribes to `mesh.requests.>`, queries the registry, responds on the request `reply` subject when present, and also publishes compatibility events to `mesh.matches.<consumer_id>`, `mesh.matches.<provider_id>` and legacy `mesh.matches` using `SESSION_TOKEN_SECRET` from `.env` (simple HMAC token).
 
 2. **Terminal 2 — Provider** (leave running):
 
@@ -46,6 +46,8 @@ If the consumer times out with “Request timeout after 25000ms”, no matching 
    ```
 
    Registers on the registry and listens for matches.
+
+   MVP note: heartbeat support already exists in the SDK (`mesh.startHeartbeat()`), but this example provider does not start it automatically yet. If your matching deployment is filtering providers by heartbeat, add that call before `mesh.listen(...)`.
 
 3. **Terminal 3 — Consumer** (one-shot, optional question as args):
 
@@ -115,3 +117,13 @@ Output: summary with avg/p50/p95/p99 and JSON report under `observability/result
 | OPENAI_MODEL          | `gpt-5-nano`                  | Optional model override |
 
 For the flow with matching on AWS, NATS, REGISTRY and SESSION_TOKEN_SECRET must match the matching deployment.
+
+## Current routing note (MVP)
+
+Today this repo is in a migration phase:
+
+- consumer `request()` uses request-reply first
+- matching also publishes directed events for consumer and provider
+- legacy `mesh.matches` is still emitted for compatibility
+
+The SDK hides most of this rollout detail, but deployment and debugging should assume all three paths can appear while migration is in progress.

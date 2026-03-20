@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,13 @@ type RegistryLister interface {
 // MatchEngine selects a provider and builds match data (Community: simple HMAC session token).
 type MatchEngine struct {
 	SessionTokenSecret []byte
+	Presence           PresenceProvider // optional; if set, only present agents are eligible
+}
+
+// PresenceProvider is an optional interface that MatchEngine can consult to ensure
+// a provider has a recent heartbeat.
+type PresenceProvider interface {
+	IsPresent(id string) bool
 }
 
 // SelectMatchResult is the result of SelectMatch: either Match or Reject.
@@ -43,17 +52,30 @@ func (e *MatchEngine) SelectMatch(
 		return SelectMatchResult{RejectReason: "registry_error"}
 	}
 
+	initialCount := len(candidates)
+
 	var dataResidency []string
 	if reqData.Constraints != nil {
 		dataResidency = reqData.Constraints.DataResidency
 	}
-	filtered := filterByDataResidency(candidates, dataResidency)
+	afterResidency := filterByDataResidency(candidates, dataResidency)
 
-	if len(filtered) == 0 {
-		return SelectMatchResult{RejectReason: "no_providers_available"}
+	var afterPresence []*agentcard.Card
+	if e.Presence != nil {
+		afterPresence = filterByPresence(afterResidency, e.Presence)
+	} else {
+		afterPresence = afterResidency
 	}
 
-	selected := selectProvider(filtered)
+	// Log counts and reasons for exclusion to help debugging
+	log.Printf("match selection counts: registry=%d after_residency=%d after_presence=%d", initialCount, len(afterResidency), len(afterPresence))
+
+	if len(afterPresence) == 0 {
+		reason := fmt.Sprintf("no_providers_available: registry=%d after_residency=%d after_presence=%d", initialCount, len(afterResidency), len(afterPresence))
+		return SelectMatchResult{RejectReason: reason}
+	}
+
+	selected := selectProvider(afterPresence)
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	expires := now.Add(1 * time.Hour)
@@ -108,6 +130,19 @@ func filterByDataResidency(candidates []*agentcard.Card, dataResidency []string)
 			}
 		}
 		if ok {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+func filterByPresence(candidates []*agentcard.Card, presence PresenceProvider) []*agentcard.Card {
+	if presence == nil {
+		return candidates
+	}
+	var filtered []*agentcard.Card
+	for _, c := range candidates {
+		if presence.IsPresent(c.Metadata.ID) {
 			filtered = append(filtered, c)
 		}
 	}

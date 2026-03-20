@@ -2,7 +2,7 @@
  * MeshClient - SDK API: register, request, listen.
  */
 
-import type { NatsConnection, Subscription } from 'nats';
+import type { NatsConnection, Subscription, Msg } from 'nats';
 import { connect } from 'nats';
 import type { AgentCard } from './contracts/agent-card.js';
 import { validateAgentCard } from './contracts/agent-card.js';
@@ -22,6 +22,10 @@ import {
 } from './cloudevents.js';
 
 const MESH_MATCHES_SUBJECT = 'mesh.matches';
+
+function sanitizeForSubject(id: string): string {
+  return id.replace(/[:\/\#@\?=\&]/g, '_').replace(/\.\./g, '_');
+}
 
 export interface MeshClientOptions {
   natsUrl: string;
@@ -165,52 +169,67 @@ export class MeshClient {
     ev.correlationid = ev.id;
     const requestId = ev.id;
 
-    return await new Promise<MatchResult | RejectResult>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        sub.unsubscribe();
-        reject(new Error(`Request timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
+    // Use request-reply (inbox) by default and also subscribe to legacy subjects as a fallback.
+    const directedSubject = `mesh.matches.${sanitizeForSubject(this.options.did)}`;
+    const subs: Subscription[] = [];
 
-      const sub = nc.subscribe(MESH_MATCHES_SUBJECT, {
-        callback: (err, msg) => {
-          if (err) {
-            clearTimeout(timeout);
-            sub.unsubscribe();
-            reject(err);
-            return;
-          }
-          if (!msg?.data) return;
-          try {
-            const event = parseCloudEvent(msg.data);
-            const ext = getAMPExtensions(event);
-            const correlationMatch =
-              ext.correlationid === requestId ||
-              (event.data && (event.data as { request_id?: string }).request_id === requestId);
-            if (!correlationMatch) return;
-
-            if (event.type === EVENT_TYPES.CAPABILITY_MATCH) {
-              clearTimeout(timeout);
-              sub.unsubscribe();
-              const data = event.data as CapabilityMatchData;
-              resolve(matchDataToResult(data));
-            } else if (event.type === EVENT_TYPES.CAPABILITY_REJECT) {
-              clearTimeout(timeout);
-              sub.unsubscribe();
-              const data = event.data as CapabilityRejectData;
-              resolve({
-                kind: 'reject',
-                requestId: data.request_id,
-                reason: data.reason,
-              });
-            }
-          } catch {
-            // ignore parse errors for other messages
-          }
-        },
-      });
-
-      nc.publish(subject, new TextEncoder().encode(serializeCloudEvent(ev)));
+    // Helper to create a Promise that resolves on legacy-directed or global messages matching correlation
+    const legacyPromise = new Promise<Msg>((resolveLegacy, rejectLegacy) => {
+      const callback = (err: Error | null, msg?: Msg) => {
+        if (err) {
+          rejectLegacy(err);
+          return;
+        }
+        if (!msg?.data) return;
+        try {
+          const event = parseCloudEvent(msg.data);
+          const ext = getAMPExtensions(event);
+          const correlationMatch =
+            ext.correlationid === requestId ||
+            (event.data && (event.data as { request_id?: string }).request_id === requestId);
+          if (!correlationMatch) return;
+          resolveLegacy(msg as Msg);
+        } catch {
+          // ignore parse errors
+        }
+      };
+      subs.push(nc.subscribe(directedSubject, { callback } as any));
+      subs.push(nc.subscribe(MESH_MATCHES_SUBJECT, { callback } as any));
     });
+
+    // Publish request using request-reply; race reply vs legacy subscription using Promise.any
+    const reqPromise = (async () => {
+      try {
+        const msg = await nc.request(subject, new TextEncoder().encode(serializeCloudEvent(ev)), { timeout: timeoutMs });
+        return msg as Msg;
+      } catch (err) {
+        // propagate rejection
+        throw err;
+      }
+    })();
+
+    try {
+      const winner = await Promise.any([reqPromise, legacyPromise]);
+      // cleanup legacy subscriptions
+      for (const s of subs) await s.unsubscribe();
+      const event = parseCloudEvent(winner.data as Uint8Array | string);
+      if (event.type === EVENT_TYPES.CAPABILITY_MATCH) {
+        const data = event.data as CapabilityMatchData;
+        return matchDataToResult(data);
+      }
+      if (event.type === EVENT_TYPES.CAPABILITY_REJECT) {
+        const data = event.data as CapabilityRejectData;
+        return { kind: 'reject', requestId: data.request_id, reason: data.reason };
+      }
+      throw new Error('unexpected event type');
+    } catch (err) {
+      // unsubscribe and rethrow or wrap timeout
+      for (const s of subs) await s.unsubscribe();
+      if ((err as any) instanceof AggregateError) {
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -220,25 +239,46 @@ export class MeshClient {
     const nc = await this.getNats();
     const did = this.options.did;
 
-    const sub = nc.subscribe(MESH_MATCHES_SUBJECT, {
-      callback: async (err, msg) => {
-        if (err || !msg?.data) return;
-        try {
-          const event = parseCloudEvent(msg.data);
-          if (event.type !== EVENT_TYPES.CAPABILITY_MATCH) return;
-          const data = event.data as CapabilityMatchData;
-          if (data.parties?.provider !== did) return;
-          const result = matchDataToResult(data);
-          await Promise.resolve(handler(result));
-        } catch {
-          // ignore
-        }
-      },
-    });
+    const directedSubject = `mesh.matches.${sanitizeForSubject(did)}`;
+    // Subscribe to directed subject (and legacy subject for compatibility)
+    const subs: Subscription[] = [];
+    subs.push(
+      nc.subscribe(directedSubject, {
+        callback: async (err, msg) => {
+          if (err || !msg?.data) return;
+          try {
+            const event = parseCloudEvent(msg.data);
+            if (event.type !== EVENT_TYPES.CAPABILITY_MATCH) return;
+            const data = event.data as CapabilityMatchData;
+            const result = matchDataToResult(data);
+            await Promise.resolve(handler(result));
+          } catch {
+            // ignore
+          }
+        },
+      })
+    );
+    subs.push(
+      nc.subscribe(MESH_MATCHES_SUBJECT, {
+        callback: async (err, msg) => {
+          if (err || !msg?.data) return;
+          try {
+            const event = parseCloudEvent(msg.data);
+            if (event.type !== EVENT_TYPES.CAPABILITY_MATCH) return;
+            const data = event.data as CapabilityMatchData;
+            if (data.parties?.provider !== did) return;
+            const result = matchDataToResult(data);
+            await Promise.resolve(handler(result));
+          } catch {
+            // ignore
+          }
+        },
+      })
+    );
 
     return {
       async unsubscribe() {
-        await sub.unsubscribe();
+        for (const s of subs) await s.unsubscribe();
       },
     };
   }
@@ -246,7 +286,37 @@ export class MeshClient {
   /**
    * Closes the NATS connection (optional; useful in tests or shutdown).
    */
+  private hbInterval: any | null = null;
+
+  async startHeartbeat(intervalMs = 30_000): Promise<void> {
+    if (this.hbInterval) return;
+    const nc = await this.getNats();
+    const subject = `mesh.agents.heartbeat.${sanitizeForSubject(this.options.did)}`;
+    const publishHB = async () => {
+      try {
+        const hb = { did: this.options.did, timestamp: new Date().toISOString() };
+        await nc.publish(subject, new TextEncoder().encode(JSON.stringify(hb)));
+      } catch (e) {
+        // best-effort: do not throw from heartbeat failures
+        // eslint-disable-next-line no-console
+        console.warn('heartbeat publish error', e);
+      }
+    };
+    await publishHB();
+    this.hbInterval = setInterval(publishHB, intervalMs) as any;
+  }
+
+  async stopHeartbeat(): Promise<void> {
+    if (!this.hbInterval) return;
+    clearInterval(this.hbInterval);
+    this.hbInterval = null;
+  }
+
   async close(): Promise<void> {
+    if (this.hbInterval) {
+      clearInterval(this.hbInterval);
+      this.hbInterval = null;
+    }
     if (this.nc) {
       await this.nc.close();
       this.nc = null;

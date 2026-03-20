@@ -1272,6 +1272,18 @@ mesh.
 └── updated
 ```
 
+### 7.5.1 Current MVP Implementation Note (March 2026)
+
+The hierarchy above is the target subject model. The current MVP implementation in this repository behaves as follows:
+
+- `mesh.requests.{domain}.{region}` is implemented and used by the SDK and matching service.
+- Matching responds directly to the NATS `reply` subject when the consumer uses request-reply.
+- During rollout, matching also publishes `amp.capability.match` and `amp.capability.reject` to `mesh.matches.{consumer_id}`, `mesh.matches.{provider_id}`, and legacy `mesh.matches`.
+- The current TypeScript SDK uses request-reply first and still keeps the legacy `mesh.matches` compatibility path active.
+- The current heartbeat contract is `mesh.agents.heartbeat.{agent_id}` with minimal JSON payload `{ "did": "<agent did>", "timestamp": "<RFC3339 timestamp>" }`.
+- Matching also accepts CloudEvent-formatted heartbeats for compatibility.
+- `amp.agent.register` and `amp.agent.deregister` remain planned protocol events, but they are not required by the current MVP implementation.
+
 ---
 
 ## 8. Matching Engine

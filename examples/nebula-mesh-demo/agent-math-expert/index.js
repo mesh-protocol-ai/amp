@@ -56,6 +56,7 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   const reg = await mesh.register(agentCardJson);
   console.log("[MathExpert] Registered:", reg.id, reg.status);
   console.log("[MathExpert] Listening for matches (Ctrl+C to exit)...\n");
+  await mesh.startHeartbeat(30_000);
 
   await mesh.listen(async (match) => {
     const sessionId = match.sessionId;

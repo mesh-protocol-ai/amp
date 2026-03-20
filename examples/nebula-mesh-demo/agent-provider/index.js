@@ -35,6 +35,7 @@ async function main() {
   console.log("[Provider] Registering Agent Card on mesh...");
   const reg = await mesh.register(agentCardJson);
   console.log("[Provider] Registered:", reg.id, reg.status);
+  await mesh.startHeartbeat(30_000);
 
   console.log("[Provider] Listening for matches (Ctrl+C to exit)...\n");
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/mesh-protocol-ai/amp/pkg/agentcard"
@@ -53,8 +54,8 @@ func TestMatchEngine_SelectMatch_NoCandidates(t *testing.T) {
 		Task: &events.RequestTask{Domain: []string{"test"}, CapabilityID: "echo"},
 	}
 	result := engine.SelectMatch(context.Background(), lister, reqData, "did:mesh:agent:consumer", "req-1", "corr-1")
-	if result.RejectReason != "no_providers_available" {
-		t.Errorf("expected no_providers_available, got %q", result.RejectReason)
+	if !strings.HasPrefix(result.RejectReason, "no_providers_available") {
+		t.Errorf("expected no_providers_available prefix, got %q", result.RejectReason)
 	}
 	if result.MatchData != nil {
 		t.Error("expected nil MatchData")

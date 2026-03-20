@@ -1,6 +1,15 @@
 # @mesh-protocol/sdk — API Design
 
+See also the control-plane rollout documents for the production migration path: [../../../docs/CONTROL_PLANE_EVOLUTION.md](../../../docs/CONTROL_PLANE_EVOLUTION.md) and [../../../docs/CONTROL_PLANE_CHECKLIST.md](../../../docs/CONTROL_PLANE_CHECKLIST.md).
+
 TypeScript SDK for the Agent Mesh Protocol (AMP). Monorepo, Node.js only, async, published as `@mesh-protocol/sdk`.
+
+Current MVP status (Mar 2026):
+
+- `request()` uses NATS request-reply first.
+- During rollout, matching also publishes `amp.capability.match` and `amp.capability.reject` to `mesh.matches.{consumer_id}`, `mesh.matches.{provider_id}`, and legacy `mesh.matches`.
+- `listen()` subscribes to the directed provider subject and keeps legacy `mesh.matches` compatibility.
+- Providers can publish presence via `startHeartbeat()` / `stopHeartbeat()`.
 
 ---
 
@@ -44,13 +53,15 @@ region?: string;
 
 ## 2. Public API (high level)
 
-All async (Promises). Three main functions + one for data plane.
+All async (Promises). Core control-plane functions plus one data-plane helper.
 
 | Method | Who uses it | Description |
 |--------|----------|-----------|
 | `register(agentCard)` | Provider | Register/update Agent Card in the Registry. |
 | `request(options)` | Consumer | Publishes capability request, waits for match or reject. |
 | `listen(handler)` | Provider | Listen to matches intended for this agent; calls handler. |
+| `startHeartbeat(intervalMs?)` | Provider | Publishes periodic heartbeat on the control plane. |
+| `stopHeartbeat()` | Provider | Stops the heartbeat loop started by `startHeartbeat()`. |
 | `openDataPlaneSession(match)` | Consumer | (Phase 2) Open gRPC session with the match provider. |
 
 ---
@@ -92,14 +103,15 @@ status: string;
 
 ## 4. request(options)
 
-**Objective:** Consumer asks for a capacity; the SDK publishes the request to NATS and expects match or reject in `mesh.matches`.
+**Objective:** Consumer asks for a capability; the SDK publishes the request to NATS and waits for match or reject using request-reply first, with compatibility fallback on directed and legacy match subjects.
 
 ### Calls
 
 | Where | What |
 |------|--------|
 | **NATS** | `PUB mesh.requests.{domain}.{region}` — payload = CloudEvent `amp.capability.request`. |
-| **NATS** | `SUB mesh.matches` — filters by `correlationId` or `data.request_id` until it receives `amp.capability.match` or `amp.capability.reject`. |
+| **NATS** | `REQ/REP mesh.requests.{domain}.{region}` — matching replies directly when `reply` is present. |
+| **NATS** | Compatibility during rollout: `SUB mesh.matches.{consumer_id}` and `SUB mesh.matches` until a matching event arrives. |
 
 Registry: not called by the consumer in this flow. gRPC: not in v1 (control plane only); in v1.1 the caller can use the returned `Match` to call `openDataPlaneSession` by account or via the SDK.
 
@@ -143,7 +155,7 @@ agreedTerms: AgreedTerms;
 interface RejectResult {
 kind: 'reject';
 requestId: string;
-reason: string;  // ex: 'no_providers_available', 'registry_error'
+reason: string;  // current MVP returns strings such as 'no_providers_available', 'registry_error' and may include diagnostic suffixes
 }
 ```
 
@@ -151,9 +163,9 @@ reason: string;  // ex: 'no_providers_available', 'registry_error'
 
 1. Generate `requestId` (ex: UUID v7) and assemble subject: `mesh.requests.{domain.join('.')}.{region || 'global'}` (e.g. `mesh.requests.demo.echo.global`).
 2. Build CloudEvent `amp.capability.request` (spec 1.0, type, source=options.did, data=CapabilityRequestData, AMP extensions: correlationId=requestId).
-3. Subscribe to `mesh.matches` **before** publishing (so you don't miss the event).
-4. Publish in the subject of step 1.
-5. Loop/await until receiving message in `mesh.matches` where `correlationId === requestId` (or `data.request_id === requestId`):
+3. Publish that event using NATS request-reply (`request()`), which creates a reply inbox automatically.
+4. Keep temporary compatibility subscriptions on `mesh.matches.{consumer_id}` and legacy `mesh.matches` while waiting for the first valid answer.
+5. The first message matching `correlationId === requestId` (or `data.request_id === requestId`) wins:
 - Se `type === 'amp.capability.match'` → return `MatchResult`.
 - Se `type === 'amp.capability.reject'` → return `RejectResult`.
 6. Se `timeoutMs` estourar → throw (ex: `TimeoutError`).
@@ -165,15 +177,16 @@ reason: string;  // ex: 'no_providers_available', 'registry_error'
 
 ---
 
-## 5. list(dealer)
+## 5. listen(handler)
 
-**Objective:** Provider listens to matches in which it is chosen and reacts (e.g. prepare data plan, execute task).
+**Objective:** Provider listens to matches addressed to its DID and reacts (e.g. prepare data plane, execute task).
 
 ### Calls
 
 | Where | What |
 |------|--------|
-| **NATS** | `SUB mesh.matches` — filter messages where `data.parties.provider === this.did`. |
+| **NATS** | `SUB mesh.matches.{provider_id}` — current primary routing path for provider notifications. |
+| **NATS** | Compatibility during rollout: `SUB mesh.matches` and filter where `data.parties.provider === this.did`. |
 
 Registry: not in the listen itself. The consumer can then use the Registry to resolve the provider's gRPC endpoint (GET /agents/:providerDid) if the match does not return the URL.
 
@@ -192,13 +205,44 @@ unsubscribe(): Promise<void>;
 
 ### Flow
 
-1. Subscribe to `mesh.matches`.
-2. For each message: parse CloudEvent; if `type === 'amp.capability.match'` and `data.parties.provider === options.did`, call `handler(matchPayload)`.
-3. Return object with `unsubscribe()` which unsubscribes in NATS.
+1. Subscribe to `mesh.matches.{provider_id}`.
+2. Keep legacy `mesh.matches` subscription during rollout.
+3. For each message: parse CloudEvent; if `type === 'amp.capability.match'` and it is addressed to this provider, call `handler(matchPayload)`.
+4. Return object with `unsubscribe()` which unsubscribes in NATS.
 
 ### Exported contracts
 
 - `MatchHandler`, `ListenSubscription`; reuse `MatchResult` from request.
+
+### 5.1 Provider presence: `startHeartbeat()` / `stopHeartbeat()`
+
+**Objective:** Keep a provider eligible when matching is filtering candidates by recent heartbeat.
+
+### Calls
+
+| Where | What |
+|------|--------|
+| **NATS** | `PUB mesh.agents.heartbeat.{sanitized_did}` — payload JSON `{ did, timestamp }`. |
+
+### Signature
+
+```ts
+async function startHeartbeat(intervalMs?: number): Promise<void>;
+async function stopHeartbeat(): Promise<void>;
+```
+
+### Flow
+
+1. `startHeartbeat()` publishes an immediate heartbeat.
+2. It starts an interval that republishes every `intervalMs` milliseconds. Default current value: `30000`.
+3. `stopHeartbeat()` clears that interval.
+
+### Current contract (MVP)
+
+- Subject: `mesh.agents.heartbeat.{sanitized_did}`
+- Payload: JSON `{ "did": "did:mesh:agent:provider-1", "timestamp": "2026-03-19T12:00:00Z" }`
+- Matching also accepts CloudEvent-formatted heartbeats for compatibility.
+- Provider apps must call this explicitly today; it is not automatic in the current SDK lifecycle.
 
 ---
 
@@ -239,8 +283,9 @@ close(): void;
 | API | Registry | NATS | gRPC |
 |-----|----------|------|------|
 | **register** | POST /agents | — (optional: pub lifecycle) | — |
-| **request** | — | PUB mesh.requests.{domain}.{region}; SUB mesh.matches | — (v1.1: consumer uses match for session) |
-| **listen** | — | SUB mesh.matches (filter provider) | — |
+| **request** | — | REQ/REP mesh.requests.{domain}.{region}; rollout compatibility on `mesh.matches.{consumer_id}` and `mesh.matches` | — (v1.1: consumer uses match for session) |
+| **listen** | — | SUB `mesh.matches.{provider_id}`; rollout compatibility on `mesh.matches` | — |
+| **startHeartbeat / stopHeartbeat** | — | PUB `mesh.agents.heartbeat.{sanitized_did}` | — |
 | **openDataPlaneSession** | GET /agents/:id (resolver endpoint) | — | Handshake, Transfer, Result |
 
 ---

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -41,8 +43,33 @@ func main() {
 		log.Println("AMP_SAFE_MODE=1: production security checks passed")
 	}
 
-	engine := &MatchEngine{SessionTokenSecret: sessionTokenSecret}
+	// Presence TTL (seconds) controls how long a heartbeat keeps an agent eligible
+	hbTTL := 90
+	if v := strings.TrimSpace(os.Getenv("HEARTBEAT_TTL_SECONDS")); v != "" {
+		if iv, err := strconv.Atoi(v); err == nil && iv > 0 {
+			hbTTL = iv
+		}
+	}
+	presence := NewPresenceCache(time.Duration(hbTTL) * time.Second)
+
+	engine := &MatchEngine{SessionTokenSecret: sessionTokenSecret, Presence: presence}
 	registry := newRegistryClient(registryURL)
+
+	// Matching cache configuration (Phase 3)
+	cacheTTL := 60
+	if v := strings.TrimSpace(os.Getenv("MATCHING_CACHE_TTL_SECONDS")); v != "" {
+		if iv, err := strconv.Atoi(v); err == nil && iv > 0 {
+			cacheTTL = iv
+		}
+	}
+	refreshSec := 30
+	if v := strings.TrimSpace(os.Getenv("MATCHING_CACHE_REFRESH_SECONDS")); v != "" {
+		if iv, err := strconv.Atoi(v); err == nil && iv > 0 {
+			refreshSec = iv
+		}
+	}
+	cachingRegistry := NewCachingRegistry(registry, time.Duration(cacheTTL)*time.Second, time.Duration(refreshSec)*time.Second)
+	log.Printf("matching cache enabled ttl=%ds refresh=%ds", cacheTTL, refreshSec)
 
 	opts := []nats.Option{nats.Timeout(5 * time.Second)}
 	if natsToken != "" {
@@ -53,13 +80,58 @@ func main() {
 		log.Fatalf("nats connect: %v", err)
 	}
 	defer nc.Close()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Optional JetStream audit publisher (Phase 5)
+	enableJS := strings.TrimSpace(os.Getenv("ENABLE_JETSTREAM_AUDIT")) == "1"
+	var audit *AuditPublisher
+	if enableJS {
+		auditStream := strings.TrimSpace(os.Getenv("JETSTREAM_AUDIT_STREAM"))
+		if auditStream == "" {
+			auditStream = "MESH_AUDIT"
+		}
+		audit = NewAuditPublisher(nc, auditStream)
+		if audit != nil && audit.enabled {
+			log.Printf("jetstream audit enabled stream=%s", auditStream)
+		} else {
+			log.Printf("jetstream audit not enabled or initialization failed")
+		}
+	}
+
+	// Subscribe to agent heartbeats and update presence cache
+	hbSub, err := nc.Subscribe("mesh.agents.heartbeat.>", func(msg *nats.Msg) {
+		now := time.Now().UTC()
+		// Try to parse as CloudEvent first
+		if ev, err := cloudevents.ParseJSON(msg.Data); err == nil {
+			did := ev.Source()
+			presence.Update(did, now)
+			return
+		}
+		// Try to parse as simple JSON payload {did: "..."}
+		var payload struct{ Did string `json:"did"` }
+		if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Did != "" {
+			presence.Update(payload.Did, now)
+			return
+		}
+		// Fallback: use subject token (sanitized id)
+		parts := strings.Split(msg.Subject, ".")
+		if len(parts) > 0 {
+			token := parts[len(parts)-1]
+			presence.Update(token, now)
+		}
+	})
+	if err != nil {
+		log.Fatalf("subscribe heartbeat: %v", err)
+	}
+	defer hbSub.Unsubscribe()
+
+	// Start background prune loop for presence
+	go presence.PruneLoop(ctx, time.Duration(hbTTL/3)*time.Second)
+
 	// Subscribe to all capability requests
 	sub, err := nc.Subscribe("mesh.requests.>", func(msg *nats.Msg) {
-		handleRequest(ctx, msg, engine, registry, nc)
+		handleRequest(ctx, msg, engine, cachingRegistry, nc, audit)
 	})
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)
@@ -71,7 +143,7 @@ func main() {
 	log.Println("matching shutting down")
 }
 
-func handleRequest(ctx context.Context, msg *nats.Msg, engine *MatchEngine, registry RegistryLister, nc *nats.Conn) {
+func handleRequest(ctx context.Context, msg *nats.Msg, engine *MatchEngine, registry RegistryLister, nc *nats.Conn, audit *AuditPublisher) {
 	ev, err := cloudevents.ParseJSON(msg.Data)
 	if err != nil {
 		log.Printf("parse cloudevent: %v", err)
@@ -97,7 +169,7 @@ func handleRequest(ctx context.Context, msg *nats.Msg, engine *MatchEngine, regi
 	result := engine.SelectMatch(ctx, registry, &reqData, consumerDID, requestID, correlationID)
 
 	if result.RejectReason != "" {
-		publishReject(nc, requestID, consumerDID, result.RejectReason)
+		publishReject(ctx, nc, requestID, consumerDID, result.RejectReason, msg.Reply, audit)
 		return
 	}
 
@@ -113,14 +185,54 @@ func handleRequest(ctx context.Context, msg *nats.Msg, engine *MatchEngine, regi
 	}
 	payload, _ := cloudevents.SerializeJSON(matchEv)
 
-	if err := nc.Publish("mesh.matches", payload); err != nil {
-		log.Printf("publish match: %v", err)
-		return
+	// Publish to reply subject if provided (request-reply flow)
+	var publishErr error
+	if msg.Reply != "" {
+		if err := nc.Publish(msg.Reply, payload); err != nil {
+			log.Printf("publish match to reply %s: %v", msg.Reply, err)
+			publishErr = err
+		} else {
+			log.Printf("match published to reply=%s request=%s session=%s", msg.Reply, requestID, result.MatchData.Session.SessionID)
+		}
 	}
-	log.Printf("match published request=%s provider=%s session=%s", requestID, result.MatchData.Parties.Provider, result.MatchData.Session.SessionID)
+
+	// Publish audit to JetStream (best-effort)
+	if audit != nil && audit.enabled {
+		if err := audit.PublishMatch(ctx, matchEv); err != nil {
+			log.Printf("audit publish match failed: %v", err)
+		}
+	}
+
+	// Also publish directed match subjects for provider and legacy global subject for compatibility/audit
+	consumerSub := "mesh.matches." + sanitizeForSubject(consumerDID)
+	if err := nc.Publish(consumerSub, payload); err != nil {
+		log.Printf("publish match to %s: %v", consumerSub, err)
+		publishErr = err
+	}
+
+	providerID := result.MatchData.Parties.Provider
+	if providerID != "" {
+		providerSub := "mesh.matches." + sanitizeForSubject(providerID)
+		if err := nc.Publish(providerSub, payload); err != nil {
+			log.Printf("publish match to %s: %v", providerSub, err)
+			publishErr = err
+		}
+	}
+
+	// Legacy compatibility path — publish to shared subject during rollout
+	if err := nc.Publish("mesh.matches", payload); err != nil {
+		log.Printf("publish legacy match: %v", err)
+		publishErr = err
+	}
+
+	if publishErr != nil {
+		log.Printf("match published with errors request=%s provider=%s session=%s: %v", requestID, providerID, result.MatchData.Session.SessionID, publishErr)
+	} else {
+		log.Printf("match published request=%s provider=%s session=%s", requestID, providerID, result.MatchData.Session.SessionID)
+	}
 }
 
-func publishReject(nc *nats.Conn, requestID, consumerDID, reason string) {
+func publishReject(ctx context.Context, nc *nats.Conn, requestID, consumerDID, reason, reply string, audit *AuditPublisher) {
 	rejData := map[string]string{"request_id": requestID, "reason": reason}
 	ev, err := cloudevents.NewEvent(
 		cloudevents.TypeCapabilityReject,
@@ -133,6 +245,37 @@ func publishReject(nc *nats.Conn, requestID, consumerDID, reason string) {
 		return
 	}
 	payload, _ := cloudevents.SerializeJSON(ev)
-	_ = nc.Publish("mesh.matches", payload)
+	// Publish reject to the reply subject if available
+	if reply != "" {
+		if err := nc.Publish(reply, payload); err != nil {
+			log.Printf("publish reject to reply %s: %v", reply, err)
+		}
+	}
+	// Publish reject to the specific consumer subject and legacy subject for compatibility
+	consumerSub := "mesh.matches." + sanitizeForSubject(consumerDID)
+	if err := nc.Publish(consumerSub, payload); err != nil {
+		log.Printf("publish reject to %s: %v", consumerSub, err)
+	}
+	if err := nc.Publish("mesh.matches", payload); err != nil {
+		log.Printf("publish legacy reject: %v", err)
+	}
+
+	// Audit reject to JetStream (best-effort)
+	if audit != nil && audit.enabled {
+		if err := audit.PublishReject(ctx, ev); err != nil {
+			log.Printf("audit publish reject failed: %v", err)
+		}
+	}
+
 	log.Printf("reject published request=%s reason=%s", requestID, reason)
+}
+
+func sanitizeForSubject(id string) string {
+	// make a best-effort sanitization for use in NATS subjects
+	// replace characters that are unsafe or commonly present in DIDs
+	r := strings.NewReplacer(":", "_", "/", "_", "#", "_", "@", "_", "?", "_", "=", "_", "&", "_")
+	s := r.Replace(id)
+	// collapse consecutive dots or underscores
+	s = strings.ReplaceAll(s, "..", "_")
+	return s
 }
