@@ -88,6 +88,16 @@ For concrete attack scenarios and mitigations: [THREAT_MODEL.md](./THREAT_MODEL.
 
 ---
 
+## Control plane status
+
+AMP's current control plane implements the MVP slices described in [docs/CONTROL_PLANE_EVOLUTION.md](./docs/CONTROL_PLANE_EVOLUTION.md) and the rollout checklist in [docs/CONTROL_PLANE_CHECKLIST.md](./docs/CONTROL_PLANE_CHECKLIST.md). Highlights:
+
+- Matching (`services/matching`) now listens on `mesh.requests.>` (NATS) with `SESSION_TOKEN_SECRET`, replies on request `reply` subjects when supplied, and publishes directed events to `mesh.matches.{consumer_id}` and `mesh.matches.{provider_id}` while keeping `mesh.matches` for compatibility and audit.
+- Providers keep themselves eligible by publishing heartbeats (`mesh.agents.heartbeat.<did>`) and matching keeps a TTL-backed presence cache (default 90s) plus a registry cache (default 60s TTL, refresh every 30s) so stale agents are filtered automatically.
+- Matching logs candidate exclusion reasons, optionally publishes matches/rejects to JetStream when `ENABLE_JETSTREAM_AUDIT=1`, and follows the migration notes in [docs/CONTROL_PLANE_GAPS.md](./docs/CONTROL_PLANE_GAPS.md). Consumers and providers should subscribe to the directed subjects or rely on the request-reply flow described in [sdk/ts/docs/API_DESIGN.md](./sdk/ts/docs/API_DESIGN.md).
+
+Production deployment guidance that keeps this behavior aligned is in [docs/DEPLOY_MATCHING_AWS.md](./docs/DEPLOY_MATCHING_AWS.md).
+
 ## Quick start
 
 **Requirements:** Go 1.22+, Docker, Docker Compose.
@@ -95,9 +105,9 @@ For concrete attack scenarios and mitigations: [THREAT_MODEL.md](./THREAT_MODEL.
 ```bash
 # Copy and fill in secrets
 cp .env.example .env
-# edit: set POSTGRES_PASSWORD, NATS_TOKEN, SESSION_TOKEN_SECRET, REGISTRY_WRITE_TOKEN
+# edit: set POSTGRES_PASSWORD, NATS_TOKEN, SESSION_TOKEN_SECRET, REGISTRY_WRITE_TOKEN, RELAY_PUBLIC_HOST
 
-# Start NATS + Postgres + Registry + Matching
+# Start NATS + Postgres + Registry + Matching + Relay
 docker compose up -d
 ```
 
@@ -185,7 +195,14 @@ Write endpoints (`POST`, `PATCH`, `DELETE`) require `Authorization: Bearer <REGI
 
 To run your own AMP endpoint: [HOSTING.md](./HOSTING.md).
 
-Public endpoint for development and testing: `api.meshprotocol.dev` · `nats.meshprotocol.dev:4222` (see [HOSTING.md](./HOSTING.md) for the dev token).
+## Public mesh hosts
+
+| Service | Address | Notes |
+|---|---|---|
+| Registry API | `https://api.meshprotocol.dev` / `https://registry.meshprotocol.dev` | TLS (Caddy) proxies the registry service. `POST/PATCH/DELETE` require `REGISTRY_WRITE_TOKEN`; see [HOSTING.md](./HOSTING.md) for the public write token and health checks. |
+| NATS / JetStream | `nats.meshprotocol.dev:4222` | Connect as `nats://<DEV_TOKEN>@nats.meshprotocol.dev:4222`. Consumers, providers, and matching all share this broker and use it for requests, matches, heartbeats, and metrics events. |
+| Data plane relay | `relay.meshprotocol.dev:7000` (control), `relay.meshprotocol.dev:7001` (data), `relay.meshprotocol.dev:50100–50199` (consumer gRPC) | Providers set `RELAY_HOST=relay.meshprotocol.dev`, register over the control channel, and open data channels when requested. `computeRelayPort(did)` mirrors the relay's deterministic port assignment. |
+| Matching | `nats.meshprotocol.dev:4222` (`mesh.requests.>` / `mesh.matches.*`) | The public matching engine subscribes to `mesh.requests.>` and publishes matches/rejects to `mesh.matches.{consumer_id}`, `mesh.matches.{provider_id}`, and `mesh.matches`. `SESSION_TOKEN_SECRET` must match the providers; see [docs/DEPLOY_MATCHING_AWS.md](./docs/DEPLOY_MATCHING_AWS.md) for deployment details. |
 
 ---
 
