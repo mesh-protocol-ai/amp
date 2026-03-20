@@ -119,7 +119,7 @@ func validCard(id string) agentcard.Card {
 }
 
 func TestServer_Register_InvalidJSON(t *testing.T) {
-	srv := NewServer(newMemStore())
+	srv := NewServer(newMemStore(), "")
 	req := httptest.NewRequest(http.MethodPost, "/agents", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -131,7 +131,7 @@ func TestServer_Register_InvalidJSON(t *testing.T) {
 
 func TestServer_Register_ValidCard(t *testing.T) {
 	store := newMemStore()
-	srv := NewServer(store)
+	srv := NewServer(store, "")
 	card := validCard("did:mesh:agent:test-1")
 	body, _ := json.Marshal(card)
 	req := httptest.NewRequest(http.MethodPost, "/agents", bytes.NewReader(body))
@@ -155,7 +155,7 @@ func TestServer_Register_ValidCard(t *testing.T) {
 }
 
 func TestServer_Get_EmptyID(t *testing.T) {
-	srv := NewServer(newMemStore())
+	srv := NewServer(newMemStore(), "")
 	req := httptest.NewRequest(http.MethodGet, "/agents/", nil)
 	req.SetPathValue("id", "")
 	rec := httptest.NewRecorder()
@@ -170,7 +170,7 @@ func TestServer_Get_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/agents/did:mesh:agent:nonexistent", nil)
 	req.SetPathValue("id", "did:mesh:agent:nonexistent")
 	rec := httptest.NewRecorder()
-	srv := NewServer(store)
+	srv := NewServer(store, "")
 	srv.Get(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("Get nonexistent: got status %d, want %d", rec.Code, http.StatusNotFound)
@@ -186,7 +186,7 @@ func TestServer_Get_Found(t *testing.T) {
 	store := newMemStore()
 	card := validCard("did:mesh:agent:found")
 	_ = store.Upsert(context.Background(), &card, "active")
-	srv := NewServer(store)
+	srv := NewServer(store, "")
 	req := httptest.NewRequest(http.MethodGet, "/agents/did:mesh:agent:found", nil)
 	req.SetPathValue("id", "did:mesh:agent:found")
 	rec := httptest.NewRecorder()
@@ -200,7 +200,7 @@ func TestServer_List_ReturnsAgents(t *testing.T) {
 	store := newMemStore()
 	card := validCard("did:mesh:agent:list-1")
 	_ = store.Upsert(context.Background(), &card, "active")
-	srv := NewServer(store)
+	srv := NewServer(store, "")
 	req := httptest.NewRequest(http.MethodGet, "/agents?domain=test", nil)
 	rec := httptest.NewRecorder()
 	srv.List(rec, req)
@@ -210,7 +210,7 @@ func TestServer_List_ReturnsAgents(t *testing.T) {
 }
 
 func TestServer_Health(t *testing.T) {
-	srv := NewServer(newMemStore())
+	srv := NewServer(newMemStore(), "")
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Health(rec, req)
