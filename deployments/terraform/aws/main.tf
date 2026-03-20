@@ -1,4 +1,4 @@
-# AMP Enterprise test — single VM (NATS + Registry + Matching + Postgres)
+# AMP Enterprise test — single VM (NATS + Registry + Matching + Postgres + Relay)
 # After apply: point api.<domain> and nats.<domain> to the instance public IP, then deploy Docker stack.
 
 terraform {
@@ -31,10 +31,10 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# Security group: SSH, HTTP, HTTPS, NATS
+# Security group: SSH, HTTP, HTTPS, NATS, Data Plane Relay
 resource "aws_security_group" "amp" {
   name        = "amp-enterprise-test"
-  description = "AMP: SSH, HTTP, HTTPS, NATS 4222"
+  description = "AMP: SSH, HTTP, HTTPS, NATS 4222, Data Plane Relay"
 
   ingress {
     from_port   = 22
@@ -66,6 +66,34 @@ resource "aws_security_group" "amp" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "NATS client connections"
+  }
+
+  # ── Data Plane Relay ───────────────────────────────────────────────────────
+  # Providers connect outbound to 7000 (control) and 7001 (data).
+  # Restrict relay_provider_cidrs in production if providers are in known CIDRs.
+
+  ingress {
+    from_port   = 7000
+    to_port     = 7000
+    protocol    = "tcp"
+    cidr_blocks = var.relay_provider_cidrs
+    description = "Relay: provider control channel"
+  }
+
+  ingress {
+    from_port   = 7001
+    to_port     = 7001
+    protocol    = "tcp"
+    cidr_blocks = var.relay_provider_cidrs
+    description = "Relay: provider data channels"
+  }
+
+  ingress {
+    from_port   = var.relay_consumer_port_start
+    to_port     = var.relay_consumer_port_start + var.relay_consumer_port_size - 1
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Relay: consumer gRPC (one port per provider DID)"
   }
 
   egress {

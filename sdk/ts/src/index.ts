@@ -73,3 +73,9 @@ export { issueSimpleToken, validateSimpleToken } from './session/simple.js';
 
 // Test/demo helpers (fixtures, example agent card, test session token)
 export { getExampleAgentCard, createTestSessionToken } from './testing/fixtures.js';
+
+// Data Plane Relay — NAT traversal for providers running behind firewalls.
+// Providers call startRelayTunnel() to register with the relay and get a
+// public grpcAddress to put in their Agent Card data_plane.grpc field.
+export { startRelayTunnel, computeRelayPort } from './relay.js';
+export type { RelayTunnelOptions, RelayTunnelHandle } from './relay.js';

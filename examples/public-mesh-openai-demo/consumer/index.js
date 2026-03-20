@@ -55,6 +55,10 @@ if (!process.env.NATS_TOKEN) {
   console.error("[Consumer] NATS_TOKEN is required for public mesh (set in .env).");
   process.exit(1);
 }
+if (!process.env.REGISTRY_WRITE_TOKEN) {
+  console.error("[Consumer] REGISTRY_WRITE_TOKEN is required (set in .env).");
+  process.exit(1);
+}
 
 async function main() {
   console.log("[Consumer] Connecting to PUBLIC mesh (Community / OPEN)...\n");
@@ -65,6 +69,7 @@ async function main() {
     did: CONSUMER_DID,
     region: "global",
     natsAuth: process.env.NATS_TOKEN ? { token: process.env.NATS_TOKEN } : undefined,
+    auth: { type: "bearer", token: process.env.REGISTRY_WRITE_TOKEN },
   });
 
   const consumerCard = {
@@ -85,11 +90,11 @@ async function main() {
   };
   await mesh.register(consumerCard, { status: "active" });
 
-  const requestMathFromMeshTool = new Tool({
-    id: "request_math_from_mesh",
-    description: "Sends a math/calculation question to a specialist on the mesh. Use this when the user asks for any math operation.",
+  const requestFromMeshTool = new Tool({
+    id: "request_from_mesh",
+    description: "Request specialist provider on mesh for any question. Input must be a JSON with 'question' field. Output will be the provider's answer or error.",
     inputSchema: z.object({
-      question: z.string().describe("The math question or expression"),
+      question: z.string().describe("The subject"),
     }),
     handler: async (_ctx, { question }) => {
       const timings = {};
@@ -97,8 +102,8 @@ async function main() {
       try {
         const matchStart = nowMs();
         const result = await mesh.request({
-          domain: ["demo", "math"],
-          capabilityId: "calculator",
+          domain: ["demo", "code"],
+          capabilityId: "software_engineer",
           description: question,
           timeoutMs: REQUEST_TIMEOUT_MS,
         });
@@ -242,8 +247,8 @@ async function main() {
     name: "PublicDemoConsumer",
     model,
     memory: new InMemory(),
-    instructions: `You cannot do math. For any numeric or calculation question, use request_math_from_mesh with the user question, then answer with the returned result. Do not invent numbers.`,
-    tools: [requestMathFromMeshTool],
+    instructions: `You cannot do anything. You don't know anything of nothing. You're completely dumb. To any question user may ask you need to request help from mesh.`,
+    tools: [requestFromMeshTool],
   });
 
   const question = process.argv.slice(2).join(" ") || "What is 2 + 2?";

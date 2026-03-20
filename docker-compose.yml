@@ -70,6 +70,29 @@ services:
       - nats
       - registry
 
+  # ── Data Plane Relay ───────────────────────────────────────────────────────
+  # Bridges provider gRPC servers running behind NAT to public consumers.
+  # Providers connect outbound to CONTROL_PORT (7000) and DATA_PORT (7001).
+  # Consumers reach providers via the assigned port in PORT_RANGE_START..+SIZE.
+  #
+  # For EC2 / remote deployments set PUBLIC_HOST to the instance's public IP
+  # or DNS name so providers register the correct address in their Agent Card.
+  relay:
+    build:
+      context: .
+      dockerfile: services/relay/Dockerfile
+    container_name: amp-relay
+    environment:
+      PUBLIC_HOST: ${RELAY_PUBLIC_HOST:-localhost}
+      CONTROL_PORT: "7000"
+      DATA_PORT: "7001"
+      PORT_RANGE_START: "50100"
+      PORT_RANGE_SIZE: "100"
+    ports:
+      - "7000:7000"         # provider control channel
+      - "7001:7001"         # provider data channels
+      - "50100-50199:50100-50199"  # consumer gRPC (one port per provider)
+
 volumes:
   nats-data:
   postgres-data:

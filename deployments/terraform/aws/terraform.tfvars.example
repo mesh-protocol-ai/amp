@@ -11,3 +11,10 @@ allowed_ssh_cidrs = ["0.0.0.0/0"]
 tags = {
   Project = "amp-enterprise-test"
 }
+
+# ── Data Plane Relay ──────────────────────────────────────────────────────────
+# Defaults are fine for MVP. Restrict relay_provider_cidrs to known CIDRs in production.
+
+# relay_provider_cidrs    = ["0.0.0.0/0"]  # allow any provider to connect
+# relay_consumer_port_start = 50100          # must match PORT_RANGE_START in Docker service
+# relay_consumer_port_size  = 100            # must match PORT_RANGE_SIZE in Docker service

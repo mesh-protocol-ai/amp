@@ -61,6 +61,10 @@ if (!SESSION_TOKEN_SECRET) {
   console.error("[MathExpert] SESSION_TOKEN_SECRET is required.");
   process.exit(1);
 }
+if (!process.env.REGISTRY_WRITE_TOKEN) {
+  console.error("[MathExpert] REGISTRY_WRITE_TOKEN is required (set in .env).");
+  process.exit(1);
+}
 
 async function main() {
   console.log("[MathExpert] Connecting to PUBLIC mesh (Community / OPEN)...\n");
@@ -71,6 +75,7 @@ async function main() {
     did: agentCardJson.metadata.id,
     region: "global",
     natsAuth: process.env.NATS_TOKEN ? { token: process.env.NATS_TOKEN } : undefined,
+    auth: { type: "bearer", token: process.env.REGISTRY_WRITE_TOKEN },
   });
 
   const model = new OpenAI({
@@ -283,6 +288,7 @@ Examples: "what is 2+2?" -> "4". "What is 15 * 3?" -> "45".`,
   const reg = await mesh.register(cardToRegister);
   console.log("[MathExpert] Registered:", reg.id, reg.status);
   console.log("[MathExpert] Listening for matches (Ctrl+C to exit)...\n");
+  await mesh.startHeartbeat(30_000);
 
   await mesh.listen(async (match) => {
     sessions.set(match.sessionId, {

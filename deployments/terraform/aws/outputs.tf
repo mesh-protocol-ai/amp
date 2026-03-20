@@ -19,3 +19,20 @@ output "ssh_command" {
   description = "Example SSH command (replace with your key path)"
   value       = "ssh -i /path/to/your-key.pem ubuntu@${aws_eip.amp.public_ip}"
 }
+
+# ── Data Plane Relay outputs ───────────────────────────────────────────────
+
+output "relay_public_host" {
+  description = "Value to set as RELAY_PUBLIC_HOST in deployments/public/.env (provider-facing relay address)"
+  value       = aws_eip.amp.public_ip
+}
+
+output "relay_control_endpoint" {
+  description = "Relay control channel — providers connect here to register (relayHost:controlPort)"
+  value       = "${aws_eip.amp.public_ip}:7000"
+}
+
+output "relay_consumer_port_range" {
+  description = "Consumer gRPC port range exposed by the relay"
+  value       = "${aws_eip.amp.public_ip}:${var.relay_consumer_port_start}-${var.relay_consumer_port_start + var.relay_consumer_port_size - 1}"
+}

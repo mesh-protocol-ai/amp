@@ -90,6 +90,27 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ─── Data Plane Relay ──────────────────────────────────────────────────────
+  # Bridges provider agents running behind NAT to consumers.
+  # Providers connect outbound to ports 7000 (control) and 7001 (data).
+  # Consumers reach each provider via a dedicated port in 50100-50199.
+  relay:
+    build:
+      context: ../..
+      dockerfile: services/relay/Dockerfile
+    container_name: amp-relay
+    environment:
+      PUBLIC_HOST: ${RELAY_PUBLIC_HOST}
+      CONTROL_PORT: "7000"
+      DATA_PORT: "7001"
+      PORT_RANGE_START: "50100"
+      PORT_RANGE_SIZE: "100"
+    ports:
+      - "7000:7000"              # provider control channel
+      - "7001:7001"              # provider data channels
+      - "50100-50199:50100-50199" # consumer gRPC (one port per provider)
+    restart: unless-stopped
+
   # ─── Caddy (TLS termination + reverse proxy) ─────────────────────────────────
   caddy:
     image: caddy:2-alpine
