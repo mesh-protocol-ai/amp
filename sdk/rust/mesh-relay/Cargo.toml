@@ -9,7 +9,8 @@ keywords    = ["mesh-protocol", "relay", "nat-traversal", "ai-agents"]
 categories  = ["network-programming", "asynchronous"]
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Require tokio with net and io-util features so packaged crate compiles on crates.io
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 anyhow = "1.0"
 tokio-util = "0.7"
 futures = "0.3"
