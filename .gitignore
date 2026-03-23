@@ -64,3 +64,4 @@ enterprise/
 website/
 
 sdk/rust/target/*
+sdk/rust/target
