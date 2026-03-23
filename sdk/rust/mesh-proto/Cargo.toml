@@ -1,0 +1,18 @@
+[package]
+name        = "mesh-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Protobuf/tonic generated bindings for the Mesh Protocol DataPlane gRPC API"
+keywords    = ["mesh-protocol", "protobuf", "grpc", "tonic", "dataplane"]
+categories  = ["network-programming", "api-bindings"]
+build = "build.rs"
+
+[dependencies]
+prost = "0.11"
+prost-types = "0.11"
+tonic = { version = "0.9", features = ["transport"] }
+
+[build-dependencies]
+tonic-build = "0.9"

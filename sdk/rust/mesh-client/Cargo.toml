@@ -1,0 +1,22 @@
+[package]
+name        = "mesh-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Control-plane client for the Mesh Protocol: NATS pub/sub, Registry HTTP API, request/listen/heartbeat"
+keywords    = ["mesh-protocol", "nats", "ai-agents", "cloud", "registry"]
+categories  = ["network-programming", "asynchronous"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+async-nats = "0.37"
+mesh-types = { path = "../mesh-types" }
+mesh-session = { path = "../mesh-session" }
+anyhow = "1.0"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"

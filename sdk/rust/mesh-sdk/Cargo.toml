@@ -1,0 +1,16 @@
+[package]
+name        = "mesh-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mesh Protocol Rust SDK — facade crate re-exporting mesh-client, mesh-dataplane, mesh-session and mesh-types"
+keywords    = ["mesh-protocol", "ai-agents", "sdk", "grpc", "nats"]
+categories  = ["network-programming", "asynchronous"]
+
+[dependencies]
+mesh-client = { path = "../mesh-client" }
+mesh-dataplane = { path = "../mesh-dataplane" }
+mesh-types = { path = "../mesh-types" }
+mesh-session = { path = "../mesh-session" }
+mesh-relay = { path = "../mesh-relay" }

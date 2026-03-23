@@ -1,0 +1,30 @@
+[workspace]
+members = [
+  "mesh-proto",
+  "mesh-types",
+  "mesh-session",
+  "mesh-client",
+  "mesh-dataplane",
+  "mesh-relay",
+  "mesh-sdk",
+]
+
+resolver = "2"
+
+# ── Workspace-level metadata (inherited by all members) ───────────────────────
+[workspace.package]
+version      = "0.1.0"
+authors      = ["Mesh Protocol Contributors"]
+edition      = "2021"
+license      = "Apache-2.0"
+repository   = "https://github.com/mesh-protocol/mesh-protocol"
+homepage     = "https://meshprotocol.io"
+documentation = "https://docs.meshprotocol.io"
+readme       = "README.md"
+
+# ── Workspace-level dependency pins (shared version resolution) ───────────────
+[workspace.dependencies]
+tokio       = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow      = "1.0"
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"

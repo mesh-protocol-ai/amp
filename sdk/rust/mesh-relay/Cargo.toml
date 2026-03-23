@@ -1,0 +1,15 @@
+[package]
+name        = "mesh-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "NAT-traversal relay tunnel client for the Mesh Protocol"
+keywords    = ["mesh-protocol", "relay", "nat-traversal", "ai-agents"]
+categories  = ["network-programming", "asynchronous"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow = "1.0"
+tokio-util = "0.7"
+futures = "0.3"

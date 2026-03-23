@@ -1,0 +1,34 @@
+[package]
+name        = "mesh-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Session token issuance/validation for the Mesh Protocol (HMAC-SHA256 + optional X25519/AES-GCM enterprise crypto)"
+keywords    = ["mesh-protocol", "session", "hmac", "aes-gcm", "x25519"]
+categories  = ["cryptography", "network-programming"]
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.21"
+subtle = "2.4"
+
+[features]
+# Enable X25519 ECDH + AES-256-GCM for enterprise end-to-end encrypted sessions.
+enterprise = ["x25519-dalek", "aes-gcm", "rand"]
+
+[dependencies.x25519-dalek]
+version = "2"
+features = ["static_secrets"]
+optional = true
+
+[dependencies.aes-gcm]
+version = "0.10"
+optional = true
+
+[dependencies.rand]
+version = "0.8"
+default-features = false
+features = ["getrandom"]
+optional = true

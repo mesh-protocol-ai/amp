@@ -2,6 +2,55 @@ name: CI
 
 on:
   push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system deps (protoc)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Check protoc
+        run: protoc --version
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build proto crate (generate Rust sources)
+        working-directory: sdk/rust/mesh-proto
+        run: cargo build -v
+
+      - name: Build workspace
+        run: cargo build --workspace --verbose
+
+      - name: Run tests (fast)
+        run: cargo test -p mesh-session -p mesh-types --no-fail-fast --quiet
+name: CI
+
+on:
+  push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
