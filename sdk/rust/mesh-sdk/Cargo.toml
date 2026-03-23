@@ -9,8 +9,8 @@ keywords    = ["mesh-protocol", "ai-agents", "sdk", "grpc", "nats"]
 categories  = ["network-programming", "asynchronous"]
 
 [dependencies]
-mesh-client = { path = "../mesh-client" }
-mesh-dataplane = { path = "../mesh-dataplane" }
-mesh-types = { path = "../mesh-types" }
-mesh-session = { path = "../mesh-session" }
-mesh-relay = { path = "../mesh-relay" }
+mesh-client = { path = "../mesh-client", version = "0.1.0" }
+mesh-dataplane = { path = "../mesh-dataplane", version = "0.1.0" }
+mesh-types = { path = "../mesh-types", version = "0.1.0" }
+mesh-session = { path = "../mesh-session", version = "0.1.0" }
+mesh-relay = { path = "../mesh-relay", version = "0.1.0" }

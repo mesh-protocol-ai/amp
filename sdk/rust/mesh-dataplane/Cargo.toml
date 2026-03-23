@@ -11,8 +11,8 @@ categories  = ["network-programming", "asynchronous"]
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = { version = "0.9", features = ["transport"] }
-mesh-proto = { path = "../mesh-proto" }
-mesh-session = { path = "../mesh-session" }
+mesh-proto = { path = "../mesh-proto", version = "0.1.0" }
+mesh-session = { path = "../mesh-session", version = "0.1.0" }
 anyhow = "1.0"
 bytes = "1.4"
 dashmap = "5.4"
