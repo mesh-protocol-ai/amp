@@ -9,6 +9,10 @@ keywords    = ["mesh-protocol", "protobuf", "grpc", "tonic", "dataplane"]
 categories  = ["network-programming", "api-bindings"]
 build = "build.rs"
 
+# Ensure proto sources are included in the crate package so packaging and build
+# work when uploaded to crates.io.
+include = ["src/**", "Cargo.toml", "build.rs", "proto/**", "README.md"]
+
 [dependencies]
 prost = "0.11"
 prost-types = "0.11"
