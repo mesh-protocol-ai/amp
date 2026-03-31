@@ -40,6 +40,10 @@ export interface CapabilityMatchData {
   parties: MatchParties;
   agreed_terms: AgreedTerms;
   session: MatchSession;
+  /** 0.0-1.0; set when semantic matching was used */
+  semantic_score?: number;
+  /** capability ID that best matched the request description */
+  matched_capability_id?: string;
 }
 
 export interface MatchParties {
@@ -79,6 +83,10 @@ export interface MatchResult {
   sessionToken: string;
   parties: { consumer: string; provider: string };
   agreedTerms: AgreedTerms;
+  /** 0.0-1.0; set when semantic matching was used */
+  semanticScore?: number;
+  /** capability ID that best matched the request description */
+  matchedCapabilityId?: string;
 }
 
 export interface RejectResult {
@@ -95,5 +103,7 @@ export function matchDataToResult(data: CapabilityMatchData): MatchResult {
     sessionToken: data.session.session_token ?? '',
     parties: data.parties,
     agreedTerms: data.agreed_terms,
+    semanticScore: data.semantic_score,
+    matchedCapabilityId: data.matched_capability_id,
   };
 }

@@ -63,5 +63,8 @@ examples/public-mesh-openai-demo/certs/
 enterprise/
 website/
 
+# Enterprise UI Panel (separate project)
+enterprise-panel/
+
 sdk/rust/target/*
 sdk/rust/target

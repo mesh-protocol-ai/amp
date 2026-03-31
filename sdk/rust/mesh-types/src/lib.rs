@@ -93,6 +93,12 @@ pub struct CapabilityMatchData {
     pub parties: PartiesData,
     pub session: SessionData,
     pub agreed_terms: Option<AgreedTerms>,
+    /// 0.0-1.0; set when semantic matching was used
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_score: Option<f64>,
+    /// Capability ID that best matched the request description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_capability_id: Option<String>,
     #[serde(flatten)]
     pub extra: Option<Value>,
 }

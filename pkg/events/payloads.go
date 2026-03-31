@@ -31,11 +31,13 @@ type BidConfig struct {
 
 // CapabilityMatchData is the "data" of event amp.capability.match (SPECS 7.4.3).
 type CapabilityMatchData struct {
-	RequestID    string       `json:"request_id"`
-	WinningBidID string       `json:"winning_bid_id,omitempty"` // MVP: can be "direct"
-	Parties      MatchParties `json:"parties"`
-	AgreedTerms  AgreedTerms  `json:"agreed_terms"`
-	Session      MatchSession `json:"session"`
+	RequestID           string       `json:"request_id"`
+	WinningBidID        string       `json:"winning_bid_id,omitempty"` // MVP: can be "direct"
+	Parties             MatchParties `json:"parties"`
+	AgreedTerms         AgreedTerms  `json:"agreed_terms"`
+	Session             MatchSession `json:"session"`
+	SemanticScore       float64      `json:"semantic_score,omitempty"`        // 0.0-1.0; set when semantic matching was used
+	MatchedCapabilityID string       `json:"matched_capability_id,omitempty"` // capability ID that best matched the request description
 }
 
 type MatchParties struct {

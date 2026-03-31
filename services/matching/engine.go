@@ -21,6 +21,9 @@ type RegistryLister interface {
 type MatchEngine struct {
 	SessionTokenSecret []byte
 	Presence           PresenceProvider // optional; if set, only present agents are eligible
+	Semantic           SemanticScorer   // optional; if set, uses semantic scoring when description is provided
+	SemanticWeight     float64          // weight of semantic score in composite ranking [0.0, 1.0]; default 0.5
+	SemanticThreshold  float64          // minimum semantic score to accept in fallback mode; default 0.3
 }
 
 // PresenceProvider is an optional interface that MatchEngine can consult to ensure
@@ -70,12 +73,54 @@ func (e *MatchEngine) SelectMatch(
 	// Log counts and reasons for exclusion to help debugging
 	log.Printf("match selection counts: registry=%d after_residency=%d after_presence=%d", initialCount, len(afterResidency), len(afterPresence))
 
+	// Semantic scoring: if description is provided and scorer is available, rank by similarity
+	description := ""
+	if reqData.Task != nil {
+		description = reqData.Task.Description
+	}
+
+	if len(afterPresence) == 0 && description != "" && e.Semantic != nil {
+		// Fallback: no exact match, but description available — try broader search
+		log.Printf("semantic fallback: exact match empty, trying domain-only search")
+		broader, err := lister.ListCandidates(ctx, reqData.Task.Domain, "")
+		if err == nil && len(broader) > 0 {
+			broader = filterByDataResidency(broader, dataResidency)
+			if e.Presence != nil {
+				broader = filterByPresence(broader, e.Presence)
+			}
+			if len(broader) > 0 {
+				scored, serr := e.Semantic.Score(ctx, description, broader)
+				if serr == nil && len(scored) > 0 {
+					threshold := e.SemanticThreshold
+					if threshold == 0 {
+						threshold = 0.3
+					}
+					best := selectBestScored(scored, threshold)
+					if best != nil {
+						log.Printf("semantic fallback matched: provider=%s cap=%s score=%.3f", best.Card.Metadata.ID, best.MatchedCapID, best.SemanticScore)
+						afterPresence = []*agentcard.Card{best.Card}
+					}
+				}
+			}
+		}
+	}
+
 	if len(afterPresence) == 0 {
 		reason := fmt.Sprintf("no_providers_available: registry=%d after_residency=%d after_presence=%d", initialCount, len(afterResidency), len(afterPresence))
 		return SelectMatchResult{RejectReason: reason}
 	}
 
+	// Apply semantic ranking if description is present and we have multiple candidates
+	var semanticScore float64
+	var matchedCapID string
 	selected := selectProvider(afterPresence)
+
+	if description != "" && e.Semantic != nil && len(afterPresence) > 0 {
+		scored, err := e.Semantic.Score(ctx, description, afterPresence)
+		if err == nil && len(scored) > 0 {
+			selected, semanticScore, matchedCapID = selectProviderComposite(scored, afterPresence, e.semanticWeight())
+		}
+	}
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	expires := now.Add(1 * time.Hour)
@@ -96,7 +141,7 @@ func (e *MatchEngine) SelectMatch(
 			Provider: selected.Metadata.ID,
 		},
 		AgreedTerms: events.AgreedTerms{
-			MaxLatencyMs:   maxLatency,
+			MaxLatencyMs:  maxLatency,
 			SecurityLevel: "OPEN",
 		},
 		Session: events.MatchSession{
@@ -105,8 +150,90 @@ func (e *MatchEngine) SelectMatch(
 			ExpiresAt:    expires.Format(time.RFC3339),
 			SessionToken: sessionToken,
 		},
+		SemanticScore:       semanticScore,
+		MatchedCapabilityID: matchedCapID,
 	}
 	return SelectMatchResult{MatchData: matchData}
+}
+
+// semanticWeight returns the configured semantic weight or the default (0.5).
+func (e *MatchEngine) semanticWeight() float64 {
+	if e.SemanticWeight > 0 {
+		return e.SemanticWeight
+	}
+	return 0.5
+}
+
+// selectProviderComposite selects the best provider using a composite score
+// that combines semantic similarity and latency.
+func selectProviderComposite(scored []ScoredCandidate, allCards []*agentcard.Card, semanticWeight float64) (*agentcard.Card, float64, string) {
+	if len(scored) == 0 {
+		return selectProvider(allCards), 0, ""
+	}
+
+	// Find max latency for normalization
+	maxLatency := 10000.0
+	for _, sc := range scored {
+		lat := float64(sc.Card.AvgLatencyMs())
+		if lat > maxLatency {
+			maxLatency = lat
+		}
+	}
+
+	var bestCard *agentcard.Card
+	var bestScore float64
+	var bestSemantic float64
+	var bestCapID string
+
+	for _, sc := range scored {
+		latencyScore := 1.0 - (float64(sc.Card.AvgLatencyMs()) / maxLatency)
+		if latencyScore < 0 {
+			latencyScore = 0
+		}
+		composite := (semanticWeight * sc.SemanticScore) + ((1 - semanticWeight) * latencyScore)
+
+		if bestCard == nil || composite > bestScore {
+			bestCard = sc.Card
+			bestScore = composite
+			bestSemantic = sc.SemanticScore
+			bestCapID = sc.MatchedCapID
+		}
+	}
+
+	// Also consider candidates that weren't semantically scored (no description) — they get semantic=0
+	scoredIDs := make(map[string]bool)
+	for _, sc := range scored {
+		scoredIDs[sc.Card.Metadata.ID] = true
+	}
+	for _, card := range allCards {
+		if scoredIDs[card.Metadata.ID] {
+			continue
+		}
+		// Candidates without descriptions get pure latency score
+		latencyScore := 1.0 - (float64(card.AvgLatencyMs()) / maxLatency)
+		composite := (1 - semanticWeight) * latencyScore
+		if composite > bestScore {
+			bestCard = card
+			bestScore = composite
+			bestSemantic = 0
+			bestCapID = ""
+		}
+	}
+
+	return bestCard, bestSemantic, bestCapID
+}
+
+// selectBestScored returns the highest-scoring candidate above the threshold.
+func selectBestScored(scored []ScoredCandidate, threshold float64) *ScoredCandidate {
+	var best *ScoredCandidate
+	for i := range scored {
+		if scored[i].SemanticScore >= threshold {
+			if best == nil || scored[i].SemanticScore > best.SemanticScore {
+				best = &scored[i]
+			}
+		}
+	}
+	return best
 }
 
 func filterByDataResidency(candidates []*agentcard.Card, dataResidency []string) []*agentcard.Card {

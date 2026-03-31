@@ -53,6 +53,72 @@ func main() {
 	presence := NewPresenceCache(time.Duration(hbTTL) * time.Second)
 
 	engine := &MatchEngine{SessionTokenSecret: sessionTokenSecret, Presence: presence}
+
+	// Semantic matching configuration
+	if strings.TrimSpace(os.Getenv("SEMANTIC_ENABLED")) == "true" || strings.TrimSpace(os.Getenv("SEMANTIC_ENABLED")) == "1" {
+		strategy := strings.TrimSpace(os.Getenv("SEMANTIC_STRATEGY"))
+		if strategy == "" {
+			strategy = "tfidf"
+		}
+
+		threshold := 0.3
+		if v := strings.TrimSpace(os.Getenv("SEMANTIC_SCORE_THRESHOLD")); v != "" {
+			if fv, err := strconv.ParseFloat(v, 64); err == nil && fv > 0 {
+				threshold = fv
+			}
+		}
+
+		weight := 0.5
+		if v := strings.TrimSpace(os.Getenv("SEMANTIC_WEIGHT")); v != "" {
+			if fv, err := strconv.ParseFloat(v, 64); err == nil && fv > 0 && fv <= 1.0 {
+				weight = fv
+			}
+		}
+
+		switch strategy {
+		case "tfidf":
+			engine.Semantic = NewTFIDFScorer(threshold)
+			log.Printf("semantic matching enabled strategy=tfidf threshold=%.2f weight=%.2f", threshold, weight)
+
+		case "embedding":
+			apiURL := strings.TrimSpace(os.Getenv("EMBEDDING_API_URL"))
+			apiKey := strings.TrimSpace(os.Getenv("EMBEDDING_API_KEY"))
+			model := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL"))
+			if model == "" {
+				model = "qwen/qwen3-embedding-0.6b"
+			}
+			dimensions := 512
+			if v := strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")); v != "" {
+				if iv, err := strconv.Atoi(v); err == nil && iv > 0 {
+					dimensions = iv
+				}
+			}
+			cacheTTLEmb := 3600
+			if v := strings.TrimSpace(os.Getenv("EMBEDDING_CACHE_TTL_SECONDS")); v != "" {
+				if iv, err := strconv.Atoi(v); err == nil && iv > 0 {
+					cacheTTLEmb = iv
+				}
+			}
+
+			if apiURL == "" {
+				log.Printf("WARNING: SEMANTIC_STRATEGY=embedding but EMBEDDING_API_URL not set; falling back to tfidf")
+				engine.Semantic = NewTFIDFScorer(threshold)
+			} else {
+				provider := NewHTTPEmbeddingProvider(apiURL, apiKey, model, dimensions)
+				cache := NewEmbeddingCache(time.Duration(cacheTTLEmb) * time.Second)
+				engine.Semantic = NewEmbeddingScorer(provider, cache, threshold)
+				log.Printf("semantic matching enabled strategy=embedding model=%s dimensions=%d cache_ttl=%ds", model, dimensions, cacheTTLEmb)
+			}
+
+		default:
+			log.Printf("WARNING: unknown SEMANTIC_STRATEGY=%s; falling back to tfidf", strategy)
+			engine.Semantic = NewTFIDFScorer(threshold)
+		}
+
+		engine.SemanticWeight = weight
+		engine.SemanticThreshold = threshold
+	}
+
 	registry := newRegistryClient(registryURL)
 
 	// Matching cache configuration (Phase 3)
