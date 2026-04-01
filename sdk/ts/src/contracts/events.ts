@@ -13,7 +13,7 @@ export interface CapabilityRequestData {
 
 export interface RequestTask {
   description?: string;
-  capability_id: string;
+  capability_id?: string;
   domain: string[];
   language?: string;
   priority?: string;

@@ -180,21 +180,19 @@ func TestTFIDFScorer_SimilarDescriptions(t *testing.T) {
 	}
 }
 
-func TestTFIDFScorer_DissimilarDescriptions(t *testing.T) {
-	scorer := NewTFIDFScorer(0.3) // higher threshold
+func TestTFIDFScorer_NoOverlap(t *testing.T) {
+	scorer := NewTFIDFScorer(0.3)
 	candidates := []*agentcard.Card{
-		cardWithDescription("agent-1", "image-proc", "Processes images and detects objects in photographs", 100),
+		cardWithDescription("agent-1", "weather", "Weather forecast temperature humidity precipitation", 100),
 	}
 
-	scored, err := scorer.Score(context.Background(), "analyze credit risk for banking", candidates)
+	scored, err := scorer.Score(context.Background(), "credit risk analysis banking loans", candidates)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should be empty or below threshold — no word overlap
-	for _, sc := range scored {
-		if sc.MatchedCapID == "image-proc" && sc.SemanticScore > 0.3 {
-			t.Errorf("dissimilar descriptions should not score above threshold, got %.4f", sc.SemanticScore)
-		}
+	// Zero word overlap means zero score — should not appear in results with threshold 0.3
+	if len(scored) != 0 {
+		t.Errorf("completely dissimilar descriptions should not score above threshold, got %d results", len(scored))
 	}
 }
 
@@ -442,6 +440,53 @@ func (m *fallbackMockLister) ListCandidates(ctx context.Context, domain []string
 		return m.broaderCards, nil
 	}
 	return m.exactCards, nil
+}
+
+// --- Semantic-only mode: no capabilityID, description drives selection ---
+
+func TestSelectMatch_SemanticOnly_NoCapabilityID(t *testing.T) {
+	// Consumer sends no capabilityID, only description + domain
+	// Registry returns all agents in the domain, scorer ranks them
+	algar := cardWithDescription("did:mesh:agent:algar", "assistant", "Assistente virtual da Algar Telecom para atendimento ao cliente", 100)
+	other := cardWithDescription("did:mesh:agent:other", "billing", "Billing and invoice processing service", 100)
+
+	scorer := &mockScorer{
+		scores: []ScoredCandidate{
+			{Card: algar, SemanticScore: 0.85, MatchedCapID: "assistant"},
+			{Card: other, SemanticScore: 0.15, MatchedCapID: "billing"},
+		},
+	}
+
+	engine := &MatchEngine{
+		SessionTokenSecret: []byte("secret"),
+		Semantic:           scorer,
+		SemanticThreshold:  0.3,
+	}
+	lister := &mockLister{cards: []*agentcard.Card{algar, other}}
+	reqData := &events.CapabilityRequestData{
+		Task: &events.RequestTask{
+			Domain:      []string{"assistant"},
+			Description: "Suporte ao cliente da Algar Telecom",
+			// No CapabilityID — semantic-only mode
+		},
+	}
+
+	result := engine.SelectMatch(context.Background(), lister, reqData, "did:mesh:agent:consumer", "req-1", "corr-1")
+	if result.RejectReason != "" {
+		t.Fatalf("expected match, got reject %q", result.RejectReason)
+	}
+	if !scorer.called {
+		t.Error("semantic scorer should have been called")
+	}
+	if result.MatchData.Parties.Provider != "did:mesh:agent:algar" {
+		t.Errorf("expected algar provider (highest semantic score), got %q", result.MatchData.Parties.Provider)
+	}
+	if result.MatchData.SemanticScore < 0.5 {
+		t.Errorf("expected high semantic score, got %.4f", result.MatchData.SemanticScore)
+	}
+	if result.MatchData.MatchedCapabilityID != "assistant" {
+		t.Errorf("expected matched_capability_id=assistant, got %q", result.MatchData.MatchedCapabilityID)
+	}
 }
 
 // --- selectBestScored tests ---

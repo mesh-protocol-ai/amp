@@ -51,7 +51,7 @@ export interface RegisterResult {
 
 export interface RequestOptions {
   domain: string[];
-  capabilityId: string;
+  capabilityId?: string;
   description?: string;
   language?: string;
   constraints?: {
@@ -138,6 +138,9 @@ export class MeshClient {
    * Publishes a capability request and waits for match or reject.
    */
   async request(options: RequestOptions): Promise<MatchResult | RejectResult> {
+    if (!options.capabilityId && !options.description) {
+      throw new Error('Either capabilityId or description is required');
+    }
     const timeoutMs = options.timeoutMs ?? 30_000;
     const nc = await this.getNats();
     const region = this.options.region ?? 'global';

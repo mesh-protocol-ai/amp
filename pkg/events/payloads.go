@@ -10,7 +10,7 @@ type CapabilityRequestData struct {
 
 type RequestTask struct {
 	Description   string   `json:"description,omitempty"`
-	CapabilityID string   `json:"capability_id"`
+	CapabilityID string   `json:"capability_id,omitempty"`
 	Domain       []string `json:"domain"`
 	Language     string   `json:"language,omitempty"`
 	Priority     string   `json:"priority,omitempty"`

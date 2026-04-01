@@ -53,7 +53,7 @@ pub struct MeshClient {
 
 pub struct RequestOptions {
     pub domain: Vec<String>,
-    pub capability_id: String,
+    pub capability_id: Option<String>,
     pub description: Option<String>,
     pub timeout_ms: Option<u64>,
 }
@@ -113,20 +113,30 @@ impl MeshClient {
     /// Publish a capability request on the control plane and await a reply.
     /// Returns the raw JSON reply as serde_json::Value for now.
     pub async fn request(&self, opts: RequestOptions) -> Result<mesh_types::MatchOrReject, anyhow::Error> {
+        if opts.capability_id.is_none() && opts.description.is_none() {
+            return Err(anyhow::anyhow!("either capability_id or description is required"));
+        }
+
         let region = self.cfg.region.clone().unwrap_or_else(|| "global".into());
         let subject = format!("mesh.requests.{}.{}", opts.domain.join("."), region);
 
         let event_id = Uuid::new_v4().to_string();
+        let mut task_data = json!({
+            "domain": opts.domain,
+        });
+        if let Some(ref cap_id) = opts.capability_id {
+            task_data["capability_id"] = json!(cap_id);
+        }
+        if let Some(ref desc) = opts.description {
+            task_data["description"] = json!(desc);
+        }
         let cloud_event = json!({
             "specversion": "1.0",
             "type": "amp.capability.request",
             "source": self.cfg.did,
             "id": event_id,
             "time": chrono::Utc::now().to_rfc3339(),
-            "data": {
-                "capability_id": opts.capability_id,
-                "description": opts.description,
-            }
+            "data": { "task": task_data }
         });
 
         let payload = serde_json::to_vec(&cloud_event)?;

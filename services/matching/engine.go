@@ -118,7 +118,23 @@ func (e *MatchEngine) SelectMatch(
 	if description != "" && e.Semantic != nil && len(afterPresence) > 0 {
 		scored, err := e.Semantic.Score(ctx, description, afterPresence)
 		if err == nil && len(scored) > 0 {
-			selected, semanticScore, matchedCapID = selectProviderComposite(scored, afterPresence, e.semanticWeight())
+			if reqData.Task.CapabilityID == "" {
+				// Semantic-only mode: capabilityID was not provided, select purely by semantic score
+				threshold := e.SemanticThreshold
+				if threshold == 0 {
+					threshold = 0.3
+				}
+				best := selectBestScored(scored, threshold)
+				if best != nil {
+					selected = best.Card
+					semanticScore = best.SemanticScore
+					matchedCapID = best.MatchedCapID
+					log.Printf("semantic-only match: provider=%s cap=%s score=%.3f", selected.Metadata.ID, matchedCapID, semanticScore)
+				}
+			} else {
+				// Hybrid mode: capabilityID filtered candidates, description ranks among them
+				selected, semanticScore, matchedCapID = selectProviderComposite(scored, afterPresence, e.semanticWeight())
+			}
 		}
 	}
 	sessionID := uuid.Must(uuid.NewV7()).String()
